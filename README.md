@@ -59,7 +59,7 @@ there's no change with just mode 6).
 Some benchmarks across 31 images (kodim corpus+others):
 
 Perceptual (average REC709 Luma PSNR - higher is better quality):
-
+```
 iscp_texcomp slow vs. bc7enc16 uber4/max_partitions 64
 iscp_texcomp:   355.4 secs 48.6 dB
 bc7enc16:       122.6 secs 50.0 dB
@@ -115,7 +115,7 @@ DirectXTex CPU in (default - no 3 subset modes) vs. bc7enc16 uber1/max_partions 
 
 DirectXTex:     9485.1 secs 45.6 dB 
 bc7enc16:       36 secs 46.0 dB
-
+```
 (Note this version of DirectXTex has a key pbit bugfix which I've submitted but
 is still waiting to be accepted. Non-bugfixed versions will be slightly lower
 quality.)
@@ -124,14 +124,14 @@ UPDATE: To illustrate how strong the mode 1+6 implementation is in bc7enc16, let
 fast vs. the latest version of bc7enc16 uber4/max_partitions 64:
 
 Without filterbank optimizations:
-
+```
                 Time       RGB PSNR   Y PSNR
 ispc_texcomp:   41.45 secs 46.09 dB   48.0 dB
 bc7enc16:       41.42 secs 46.03 dB   48.2 dB
 
 With filterbank optimizations enabled:
 bc7enc16:       38.78 secs 45.94 dB   48.12 dB
-
+```
 They both have virtually the same average RGB PSNR with these settings (.06 dB is basically noise), but 
 bc7enc16 is just as fast as ispc_texcomp fast, even though it's not vectorized. Interestingly, our Y PSNR is better, 
 although bc7enc16 wasn't using perceptual metrics in these benchmarks. 
