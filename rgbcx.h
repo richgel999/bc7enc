@@ -16,6 +16,7 @@
 #include <stdint.h>
 #include <algorithm>
 #include <assert.h>
+#include <limits.h>
 
 namespace rgbcx
 {
