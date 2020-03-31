@@ -1,8 +1,9 @@
 bc7enc - Fast, single source file BC1-5 and BC7/BPTC GPU texture encoders.
 
 Features:
-- BC7 encoder has perceptual colorspace metric support. 
+- BC7 encoder has perceptual colorspace metric support, and is very fast compared to ispc_texcomp (see below) for RGB textures.
 - BC1/3 encoder uses a new algorithm (which we've named "prioritized cluster fit") which is 2-3x faster than traditional cluster fit (as implemented in libsquish with SSE2) at the same or slightly higher average quality using scalar CPU instructions.
+- Full decoders for BC1-5/7.
 
 This project is basically a demo of some of the techniques we use in Basis BC7,
 which is Binomial's state of the art vectorized BC7 encoder. Basis BC7 is the
