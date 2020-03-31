@@ -1,9 +1,10 @@
 bc7enc - Fast, single source file BC1-5 and BC7/BPTC GPU texture encoders.
 
 Features:
-- BC7 encoder has perceptual colorspace metric support, and is very fast compared to ispc_texcomp (see below) for RGB textures.
-- BC1/3 encoder uses a new algorithm (which we've named "prioritized cluster fit") which is 2-3x faster than traditional cluster fit (as implemented in libsquish with SSE2) at the same or slightly higher average quality using scalar CPU instructions.
-- Full decoders for BC1-5/7.
+- BC1/3 encoder (in rgbcx.h) uses a new algorithm (which we've named "prioritized cluster fit") which is 2-3x faster than traditional cluster fit (as implemented in [libsquish](https://github.com/svn2github/libsquish) with SSE2) at the same or slightly higher average quality using scalar CPU instructions.
+- BC7 encoder (in bc7enc.c/.h) has perceptual colorspace metric support, and is very fast compared to ispc_texcomp (see below) for RGB textures.
+Note: The BC7 encoder is work in progress. We are adding more modes and optimizing the core algorithms to use prioritized cluster fit. 
+- Full decoders for BC1-5/7. BC7 decoder is in bc7decomp.cpp/.h, BC1-5 decoders in rgbcx.h.
 
 This project is basically a demo of some of the techniques we use in Basis BC7,
 which is Binomial's state of the art vectorized BC7 encoder. Basis BC7 is the
@@ -11,7 +12,7 @@ highest quality and fastest CPU BC7 encoder available (2-3x faster than
 ispc_texcomp). It supports all modes and linear/perceptual colorspace metrics.
 Licensees get full ISPC source code so they can customize the codec as needed.
 
-bc7enc currently only supports modes 1 and 6 for RGB, and modes 1, 5, 6, and 7 for alpha. The plan is to add all the modes. See the [bc7enc16](https://github.com/richgel999/bc7enc16) project to see the previous version (which only supported modes 1 and 6). Note this readme still refers to "bc7enc16", but bc7enc is the same encoder but with more alpha modes.
+bc7enc currently only supports modes 1 and 6 for RGB, and modes 1, 5, 6, and 7 for alpha. The plan is to add all the modes. See the [bc7enc16](https://github.com/richgel999/bc7enc16) project for the previous version (which only supports modes 1 and 6). Note this readme still refers to "bc7enc16", but bc7enc is the same encoder but with more alpha modes.
 
 This codec supports a perceptual mode when encoding BC7, where it computes colorspace error in
 weighted YCbCr space (like etc2comp), and it also supports weighted RGBA
