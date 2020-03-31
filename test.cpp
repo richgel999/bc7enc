@@ -39,7 +39,7 @@ static int print_usage()
 	fprintf(stderr, "-y Flip source image along Y axis before packing\n");
 	fprintf(stderr, "-o Write output files in same directory as source files\n");
 	fprintf(stderr, "-1 Encode to BC1. -u[0,5] controls quality vs. perf. tradeoff for RGB.\n");
-	fprintf(stderr, "-3 Encode to BC3. -u[0,5] controls quality vs. perf. tradeoff for RGB\n");
+	fprintf(stderr, "-3 Encode to BC3. -u[0,5] controls quality vs. perf. tradeoff for RGB.\n");
 	fprintf(stderr, "-4 Encode to BC4\n");
 	fprintf(stderr, "-5 Encode to BC5\n");
 	fprintf(stderr, "-X# Set first BC4/5 color channel (defaults to 0 or red)\n");
