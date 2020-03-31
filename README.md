@@ -1,4 +1,8 @@
-bc7enc - Fast, single source file BC7/BPTC GPU texture encoder with perceptual colorspace metric support
+bc7enc - Fast, single source file BC1-5 and BC7/BPTC GPU texture encoders.
+
+Features:
+- BC7 encoder has perceptual colorspace metric support. 
+- BC1/3 encoder uses a new algorithm (which we've named "prioritized cluster fit") which is 2-3x faster than traditional cluster fit (as implemented in libsquish with SSE2) at the same or slightly higher average quality using scalar CPU instructions.
 
 This project is basically a demo of some of the techniques we use in Basis BC7,
 which is Binomial's state of the art vectorized BC7 encoder. Basis BC7 is the
@@ -6,16 +10,15 @@ highest quality and fastest CPU BC7 encoder available (2-3x faster than
 ispc_texcomp). It supports all modes and linear/perceptual colorspace metrics.
 Licensees get full ISPC source code so they can customize the codec as needed.
 
-bc7enc currently only supports modes 1 and 6 for RGB, and modes 1, 5, 6, and 7 for alpha. 
+bc7enc currently only supports modes 1 and 6 for RGB, and modes 1, 5, 6, and 7 for alpha. The plan is to add all the modes. See the [bc7enc16](https://github.com/richgel999/bc7enc16) project to see the previous version (which only supported modes 1 and 6). Note this readme still refers to "bc7enc16", but bc7enc is the same encoder but with more alpha modes.
 
-
-This codec supports a perceptual mode, where it computes colorspace error in
+This codec supports a perceptual mode when encoding BC7, where it computes colorspace error in
 weighted YCbCr space (like etc2comp), and it also supports weighted RGBA
 metrics. It's particular strong in perceptual mode, beating the current state of
 the art CPU encoder (Intel's ispc_texcomp) by a wide margin when measured by
 Luma PSNR, even though it only supports 2 modes and isn't vectorized.
 
-Why only modes 1 and 6?
+Why only modes 1 and 6 for opaque BC7?
 Because with these two modes you have a complete encoder that supports both
 opaque and transparent textures in a small amount (~1400 lines) of
 understandable plain C code. Mode 6 excels on smooth blocks, and mode 1 is
