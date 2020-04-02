@@ -664,7 +664,7 @@ int main(int argc, char *argv[])
 	case 0: rgbcx_flags = rgbcx::LEVEL0_OPTIONS; break;
 	case 1: rgbcx_flags = rgbcx::LEVEL1_OPTIONS; break;
 	case 2: rgbcx_flags = rgbcx::LEVEL2_OPTIONS; rgbcx_total_orderings_to_try = rgbcx::MIN_TOTAL_ORDERINGS; break;
-	case 3: rgbcx_flags = rgbcx::LEVEL2_OPTIONS; rgbcx_total_orderings_to_try = 8; break;
+	case 3: rgbcx_flags = rgbcx::LEVEL2_OPTIONS; rgbcx_total_orderings_to_try = 10; break;
 	case 4: rgbcx_flags = rgbcx::LEVEL2_OPTIONS; rgbcx_total_orderings_to_try = 16; break;
 	case 5: rgbcx_flags = rgbcx::LEVEL2_OPTIONS; rgbcx_total_orderings_to_try = rgbcx::MAX_TOTAL_ORDERINGS; break;
 	default:
