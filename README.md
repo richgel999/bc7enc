@@ -1,9 +1,11 @@
 bc7enc - Fast, single source file BC1-5 and BC7/BPTC GPU texture encoders.
 
 Features:
-- BC1/3 encoder (in rgbcx.h) uses a new algorithm (which we've named "prioritized cluster fit") which is 2-3x faster than traditional cluster fit (as implemented in [libsquish](https://github.com/svn2github/libsquish) with SSE2) at the same or slightly higher average quality using scalar CPU instructions.
-- BC7 encoder (in bc7enc.c/.h) has perceptual colorspace metric support, and is very fast compared to ispc_texcomp (see below) for RGB textures.
-Note: The BC7 encoder is work in progress. We are adding more modes and optimizing the core algorithms to use prioritized cluster fit. 
+- BC1/3 encoder (in rgbcx.h) uses a new algorithm (which we've named "prioritized cluster fit") which is ~4x faster than traditional cluster fit (as implemented in [libsquish](https://github.com/svn2github/libsquish) with SSE2) at the same or slightly higher average quality using scalar CPU instructions.
+The BC1 encoder also implements Castano's optimal endpoint rounding improvement.
+
+- BC7 encoder (in bc7enc.c/.h) has perceptual colorspace metric support, and is very fast compared to ispc_texcomp (see below) for RGB textures. Important: The BC7 encoder included in this repo is still a work in progress. I took bc7enc16 and added more modes for better alpha support, but it needs more testing and development.
+
 - Full decoders for BC1-5/7. BC7 decoder is in bc7decomp.cpp/.h, BC1-5 decoders in rgbcx.h.
 
 This project is basically a demo of some of the techniques we use in Basis BC7,
