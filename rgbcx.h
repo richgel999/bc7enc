@@ -23,36 +23,52 @@ namespace rgbcx
 	// Encode_bc1_init() MUST be called once before using the BC1 encoder.
 	void encode_bc1_init();
 
+	// Optimally encodes a solid color block to BC1 format.
 	void encode_bc1_solid_block(void* pDst, uint32_t fr, uint32_t fg, uint32_t fb);
 
 	enum
 	{
-		cEncodeBC1UsePCA = 1,
+		// Try to improve quality using the most likely total orderings. The total_orderings_to_try controls the number of total orderings to try.
 		cEncodeBC1UseLikelyTotalOrderings = 2,
-		cEncodeBC1HighQuality = 4
+		
+		// Use 2 least squares pass, instead of one (same as stb_dxt's HIGHQUAL option).
+		cEncodeBC1HighQuality = 4,
+
+		// cEncodeBC1Use3ColorBlocksForBlackPixels allows the BC1 encoder to use 3-color blocks for blocks containing black or very dark pixels. 
+		// You shader/engine MUST ignore the alpha channel on textures encoded with this flag.
+		// Average quality goes up substantially for my 100 texture corpus (.5 dB), so it's worth using if you can.
+		// Note the BC1 encoder does not actually support transparency in 3-color mode.
+		cEncodeBC1Use3ColorBlocksForBlackPixels = 8
 	};
 
 	// Level 0 is similar to stb_dxt default quality.
-	const uint32_t LEVEL0_OPTIONS = cEncodeBC1UsePCA;
+	const uint32_t LEVEL0_OPTIONS = 0;
+	
 	// Level 0 is similar to stb_dxt HIGHQUAL.
-	const uint32_t LEVEL1_OPTIONS = cEncodeBC1UsePCA | cEncodeBC1HighQuality;
+	const uint32_t LEVEL1_OPTIONS = cEncodeBC1HighQuality;
+	
 	// Level 2 allows the quality to smoothly vary, from slightly higher than level 1 all the way up to around libsquish. Use total_orderings_to_try to [1,32] to vary quality vs. performance.
-	const uint32_t LEVEL2_OPTIONS = cEncodeBC1UsePCA | cEncodeBC1HighQuality | cEncodeBC1UseLikelyTotalOrderings;
+	const uint32_t LEVEL2_OPTIONS = cEncodeBC1HighQuality | cEncodeBC1UseLikelyTotalOrderings;
+
 	const uint32_t DEFAULT_OPTIONS = LEVEL2_OPTIONS;
 
 	const uint32_t MIN_TOTAL_ORDERINGS = 1;
 	const uint32_t MAX_TOTAL_ORDERINGS = 32;
 	
-	// DEFAULT_TOTAL_ORDERINGS_TO_TRY is around 2x faster than libsquish at slightly higher average quality.
-	const uint32_t DEFAULT_TOTAL_ORDERINGS_TO_TRY = 16; 
+	// DEFAULT_TOTAL_ORDERINGS_TO_TRY is around 3x faster than libsquish at slightly higher average quality. 10-16 is a good range to start to compete against libsquish.
+	const uint32_t DEFAULT_TOTAL_ORDERINGS_TO_TRY = 10;
 		
 	// Encodes a block of 4x4 pixels to BC1 format. 
-	// Always returns a 4 color block, no transparency supported.
+	// Always returns a 4 color block, unless cEncodeBC1Use3ColorBlocksForBlackPixels is specified. This flag allows the encoder to use the 3-color+transparent black mode on blocks with very dark or black pixels.
+	// No transparency supported.
 	// total_orderings_to_try controls the perf. vs. quality tradeoff when the cEncodeBC1UseLikelyTotalOrderings flag is used.
-	void encode_bc1(void* pDst, const uint8_t* pPixels, uint32_t flags = LEVEL2_OPTIONS, uint32_t total_orderings_to_try = DEFAULT_TOTAL_ORDERINGS_TO_TRY);
+	// The pixels are in RGBA format, where R is first in memory. The BC1 encoder ignores the alpha channel.
+	void encode_bc1(void* pDst, const uint8_t* pPixels, uint32_t flags = DEFAULT_OPTIONS, uint32_t total_orderings_to_try = DEFAULT_TOTAL_ORDERINGS_TO_TRY);
 
 	void encode_bc4(void* pDst, const uint8_t* pPixels, uint32_t stride = 4);
-	void encode_bc3(void* pDst, const uint8_t* pPixels, uint32_t flags= LEVEL2_OPTIONS, uint32_t total_orderings_to_try = DEFAULT_TOTAL_ORDERINGS_TO_TRY);
+
+	void encode_bc3(void* pDst, const uint8_t* pPixels, uint32_t flags = DEFAULT_OPTIONS, uint32_t total_orderings_to_try = DEFAULT_TOTAL_ORDERINGS_TO_TRY);
+
 	void encode_bc5(void* pDst, const uint8_t* pPixels, uint32_t chan0 = 0, uint32_t chan1 = 1, uint32_t stride = 4);
 
 	// Returns true if the block uses 3 color punchthrough alpha mode.
@@ -104,7 +120,7 @@ namespace rgbcx
 		{3,0,5,8},{0,0,15,1},{2,4,5,5},{0,3,7,6},{2,0,0,14},{1,1,12,2},{2,6,8,0},{3,1,8,4},{0,1,5,10}
 	};
 
-	// For each total ordering, this table indices which other total orderings are likely to improve quality using a least squares pass. It's sorted by usefulness.
+	// For each total ordering, this table indicates which other total orderings are likely to improve quality using a least squares pass. Each array is sorted by usefulness.
 	static uint16_t g_best_total_orderings[NUM_UNIQUE_TOTAL_ORDERINGS][32] = 
 	{
 		{ 202,120,13,318,15,23,403,450,5,51,260,128,77,21,33,494,515,523,4,141,269,1,2,700,137,49,48,102,7,64,753,82  },
@@ -1565,6 +1581,56 @@ namespace rgbcx
 		return total_err;
 	}
 
+	static inline uint32_t bc1_find_sels3_err(const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16], uint32_t cur_err = UINT32_MAX)
+	{
+		uint32_t block_r[3], block_g[3], block_b[3];
+
+		block_r[0] = (lr << 3) | (lr >> 2); block_g[0] = (lg << 2) | (lg >> 4);	block_b[0] = (lb << 3) | (lb >> 2);
+		block_r[1] = (hr << 3) | (hr >> 2);	block_g[1] = (hg << 2) | (hg >> 4);	block_b[1] = (hb << 3) | (hb >> 2);
+		block_r[2] = (block_r[0] + block_r[1]) / 2; block_g[2] = (block_g[0] + block_g[1]) / 2; block_b[2] = (block_b[0] + block_b[1]) / 2;
+								
+		uint32_t total_err = 0;
+
+		for (uint32_t i = 0; i < 16; i++)
+		{
+			const int r = pSrc_pixels[i].r;
+			const int g = pSrc_pixels[i].g;
+			const int b = pSrc_pixels[i].b;
+
+			uint32_t best_err = squarei((int)block_r[0] - (int)r) + squarei((int)block_g[0] - (int)g) + squarei((int)block_b[0] - (int)b);
+			uint32_t best_sel = 0;
+
+			uint32_t err1 = squarei((int)block_r[1] - (int)r) + squarei((int)block_g[1] - (int)g) + squarei((int)block_b[1] - (int)b);
+			if (err1 < best_err)
+			{
+				best_err = err1;
+				best_sel = 1;
+			}
+
+			uint32_t err2 = squarei((int)block_r[2] - (int)r) + squarei((int)block_g[2] - (int)g) + squarei((int)block_b[2] - (int)b);
+			if (err2 < best_err)
+			{
+				best_err = err2;
+				best_sel = 2;
+			}
+
+			uint32_t err3 = squarei(r) + squarei(g) + squarei(b);
+			if (err3 < best_err)
+			{
+				best_err = err3;
+				best_sel = 3;
+			}
+			
+			total_err += best_err;
+			if (total_err >= cur_err)
+				return total_err;
+			
+			sels[i] = (uint8_t)best_sel;
+		}
+
+		return total_err;
+	}
+
 	static inline void precise_round_565(const vec3F &xl, const vec3F &xh, 
 		int &trial_lr, int &trial_lg, int &trial_lb,
 		int &trial_hr, int &trial_hg, int &trial_hb)
@@ -1601,6 +1667,159 @@ namespace rgbcx
 		trial_hb = (trial_hb + (xh.c[2] > g_midpoint5[trial_hb])) & 31;
 	}
 
+	// This is a rather weak 3-color block encoder. But it's valuable in those cases where the 4-color mode is especially bad.
+	static bool try_3color_block(void *pDst, const color32* pSrc_pixels, uint32_t flags, uint32_t cur_err)
+	{
+		int total_r = 0, total_g = 0, total_b = 0;
+		int max_r = 0, max_g = 0, max_b = 0;
+		int min_r = 255, min_g = 255, min_b = 255;
+		int total_pixels = 0;
+		for (uint32_t i = 1; i < 16; i++)
+		{
+			const int r = pSrc_pixels[i].r, g = pSrc_pixels[i].g, b = pSrc_pixels[i].b;
+			if ((r | g | b) < 4)
+				continue;
+			
+			max_r = std::max(max_r, r); max_g = std::max(max_g, g); max_b = std::max(max_b, b);
+			min_r = std::min(min_r, r); min_g = std::min(min_g, g); min_b = std::min(min_b, b);
+			total_r += r; total_g += g; total_b += b;
+				
+			total_pixels++;
+		}
+
+		if (!total_pixels)
+			return false;
+
+		int half_total_pixels = total_pixels >> 1;
+		int avg_r = (total_r + half_total_pixels) / total_pixels;
+		int avg_g = (total_g + half_total_pixels) / total_pixels;
+		int avg_b = (total_b + half_total_pixels) / total_pixels;
+
+		uint32_t low_c = 0, high_c = 0;
+
+		int icov[6] = { 0, 0, 0, 0, 0, 0 };
+		for (uint32_t i = 0; i < 16; i++)
+		{
+			int r = (int)pSrc_pixels[i].r;
+			int g = (int)pSrc_pixels[i].g;
+			int b = (int)pSrc_pixels[i].b;
+
+			if ((r | g | b) < 4)
+				continue;
+
+			r -= avg_r;
+			g -= avg_g;
+			b -= avg_b;
+
+			icov[0] += r * r;
+			icov[1] += r * g;
+			icov[2] += r * b;
+			icov[3] += g * g;
+			icov[4] += g * b;
+			icov[5] += b * b;
+		}
+
+		float cov[6];
+		for (uint32_t i = 0; i < 6; i++)
+			cov[i] = (float)(icov[i]) * (1.0f / 255.0f);
+			
+		float xr = (float)(max_r - min_r);
+		float xg = (float)(max_g - min_g);
+		float xb = (float)(max_b - min_b);
+		for (uint32_t power_iter = 0; power_iter < 4; power_iter++)
+		{
+			float r = xr * cov[0] + xg * cov[1] + xb * cov[2];
+			float g = xr * cov[1] + xg * cov[3] + xb * cov[4];
+			float b = xr * cov[2] + xg * cov[4] + xb * cov[5];
+			xr = r; xg = g; xb = b;
+		}
+
+		float k = maximum(fabsf(xr), fabsf(xg), fabsf(xb));
+		int saxis_r = 306, saxis_g = 601, saxis_b = 117;
+		if (k >= 2)
+		{
+			float m = 1024.0f / k;
+			saxis_r = (int)(xr * m);
+			saxis_g = (int)(xg * m);
+			saxis_b = (int)(xb * m);
+		}
+			
+		int low_dot = INT_MAX, high_dot = INT_MIN;
+		for (uint32_t i = 0; i < 16; i++)
+		{
+			int r = (int)pSrc_pixels[i].r, g = (int)pSrc_pixels[i].g, b = (int)pSrc_pixels[i].b;
+
+			if ((r | g | b) < 4)
+				continue;
+
+			int dot = r * saxis_r + g * saxis_g + b * saxis_b;
+			if (dot < low_dot)
+			{
+				low_dot = dot;
+				low_c = i;
+			}
+			if (dot > high_dot)
+			{
+				high_dot = dot;
+				high_c = i;
+			}
+		}
+
+		int lr = to_5(pSrc_pixels[low_c].r);
+		int lg = to_6(pSrc_pixels[low_c].g);
+		int lb = to_5(pSrc_pixels[low_c].b);
+
+		int hr = to_5(pSrc_pixels[high_c].r);
+		int hg = to_6(pSrc_pixels[high_c].g);
+		int hb = to_5(pSrc_pixels[high_c].b);
+
+		uint8_t trial_sels[16];
+		uint32_t trial_err = bc1_find_sels3_err(pSrc_pixels, lr, lg, lb, hr, hg, hb, trial_sels, cur_err);
+
+		if (trial_err < cur_err)
+		{
+			uint32_t lc16 = bc1_block::pack_unscaled_color(lr, lg, lb);
+			uint32_t hc16 = bc1_block::pack_unscaled_color(hr, hg, hb);
+
+			bool invert_flag = false;
+			if (lc16 > hc16)
+			{
+				std::swap(lc16, hc16);
+				invert_flag = true;
+			}
+
+			assert(lc16 <= hc16);
+			
+			bc1_block* pDst_block = static_cast<bc1_block*>(pDst);
+			pDst_block->set_low_color((uint16_t)lc16);
+			pDst_block->set_high_color((uint16_t)hc16);
+
+			uint32_t packed_sels = 0;
+			
+			if (invert_flag)
+			{
+				static const uint8_t s_sel_trans_inv[4] = { 1, 0, 2, 3 };
+				
+				for (uint32_t i = 0; i < 16; i++)
+					packed_sels |= ((uint32_t)s_sel_trans_inv[trial_sels[i]] << (i * 2));
+			}
+			else
+			{
+				for (uint32_t i = 0; i < 16; i++)
+					packed_sels |= ((uint32_t)trial_sels[i] << (i * 2));
+			}
+
+			pDst_block->m_selectors[0] = (uint8_t)packed_sels;
+			pDst_block->m_selectors[1] = (uint8_t)(packed_sels >> 8);
+			pDst_block->m_selectors[2] = (uint8_t)(packed_sels >> 16);
+			pDst_block->m_selectors[3] = (uint8_t)(packed_sels >> 24);
+						
+			return true;
+		}
+
+		return false;
+	}
+
 	void encode_bc1(void* pDst, const uint8_t* pPixels, uint32_t flags, uint32_t total_orderings_to_try)
 	{
 		assert(g_initialized);
@@ -1625,16 +1844,17 @@ namespace rgbcx
 			encode_bc1_solid_block(pDst, fr, fg, fb);
 			return;
 		}
-
-		// Select 2 colors along the principle axis. (There must be a faster/simpler way.)
+				
 		int total_r = fr, total_g = fg, total_b = fb;
 		max_r = fr, max_g = fg, max_b = fb;
 		min_r = fr, min_g = fg, min_b = fb;
 		uint32_t grayscale_flag = (fr == fg) && (fr == fb);
+		uint32_t any_black_pixels = (fr | fg | fb) < 4;
 		for (uint32_t i = 1; i < 16; i++)
 		{
 			const int r = pSrc_pixels[i].r, g = pSrc_pixels[i].g, b = pSrc_pixels[i].b;
 			grayscale_flag &= ((r == g) && (r == b));
+			any_black_pixels |= ((r | g | b) < 4);
 			max_r = std::max(max_r, r); max_g = std::max(max_g, g); max_b = std::max(max_b, b);
 			min_r = std::min(min_r, r); min_g = std::min(min_g, g); min_b = std::min(min_b, b);
 			total_r += r; total_g += g; total_b += b;
@@ -1661,163 +1881,61 @@ namespace rgbcx
 		}
 		else
 		{
-			// Find the shortest vector from a AABB corner to the block's average color.
-			// This is to help avoid outliers.
+			// Select 2 colors along the principle axis. (There must be a faster/simpler way.)
 			uint32_t low_c = 0, high_c = 0;
 
-			if (flags & cEncodeBC1UsePCA)
+			int icov[6] = { 0, 0, 0, 0, 0, 0 };
+			for (uint32_t i = 0; i < 16; i++)
 			{
-				int icov[6] = { 0, 0, 0, 0, 0, 0 };
-				for (uint32_t i = 0; i < 16; i++)
-				{
-					int r = (int)pSrc_pixels[i].r - avg_r;
-					int g = (int)pSrc_pixels[i].g - avg_g;
-					int b = (int)pSrc_pixels[i].b - avg_b;
-					icov[0] += r * r;
-					icov[1] += r * g;
-					icov[2] += r * b;
-					icov[3] += g * g;
-					icov[4] += g * b;
-					icov[5] += b * b;
-				}
-
-				float cov[6];
-				for (uint32_t i = 0; i < 6; i++)
-					cov[i] = static_cast<float>(icov[i])* (1.0f / 255.0f);
-			
-				float xr = (float)(max_r - min_r);
-				float xg = (float)(max_g - min_g);
-				float xb = (float)(max_b - min_b);
-				for (uint32_t power_iter = 0; power_iter < 4; power_iter++)
-				{
-					float r = xr * cov[0] + xg * cov[1] + xb * cov[2];
-					float g = xr * cov[1] + xg * cov[3] + xb * cov[4];
-					float b = xr * cov[2] + xg * cov[4] + xb * cov[5];
-					xr = r; xg = g; xb = b;
-				}
-
-				float k = maximum(fabsf(xr), fabsf(xg), fabsf(xb));
-				int saxis_r = 306, saxis_g = 601, saxis_b = 117;
-				if (k >= 2)
-				{
-					float m = 1024.0f / k;
-					saxis_r = (int)(xr * m);
-					saxis_g = (int)(xg * m);
-					saxis_b = (int)(xb * m);
-				}
-			
-				int low_dot = INT_MAX, high_dot = INT_MIN;
-				for (uint32_t i = 0; i < 16; i++)
-				{
-					int dot = pSrc_pixels[i].r * saxis_r + pSrc_pixels[i].g * saxis_g + pSrc_pixels[i].b * saxis_b;
-					if (dot < low_dot)
-					{
-						low_dot = dot;
-						low_c = i;
-					}
-					if (dot > high_dot)
-					{
-						high_dot = dot;
-						high_c = i;
-					}
-				}
+				int r = (int)pSrc_pixels[i].r - avg_r;
+				int g = (int)pSrc_pixels[i].g - avg_g;
+				int b = (int)pSrc_pixels[i].b - avg_b;
+				icov[0] += r * r;
+				icov[1] += r * g;
+				icov[2] += r * b;
+				icov[3] += g * g;
+				icov[4] += g * b;
+				icov[5] += b * b;
 			}
-			else
+
+			float cov[6];
+			for (uint32_t i = 0; i < 6; i++)
+				cov[i] = (float)(icov[i]) * (1.0f / 255.0f);
+			
+			float xr = (float)(max_r - min_r);
+			float xg = (float)(max_g - min_g);
+			float xb = (float)(max_b - min_b);
+			for (uint32_t power_iter = 0; power_iter < 4; power_iter++)
 			{
-				uint32_t dist[3][2];
-				dist[0][0] = square(min_r - avg_r) << 3; dist[0][1] = square(max_r - avg_r) << 3;
-				dist[1][0] = square(min_g - avg_g) << 3; dist[1][1] = square(max_g - avg_g) << 3;
-				dist[2][0] = square(min_b - avg_b) << 3; dist[2][1] = square(max_b - avg_b) << 3;
+				float r = xr * cov[0] + xg * cov[1] + xb * cov[2];
+				float g = xr * cov[1] + xg * cov[3] + xb * cov[4];
+				float b = xr * cov[2] + xg * cov[4] + xb * cov[5];
+				xr = r; xg = g; xb = b;
+			}
 
-				uint32_t min_d0 = (dist[0][0] + dist[1][0] + dist[2][0]);
-				uint32_t d4 = (dist[0][0] + dist[1][0] + dist[2][1]) | 4;
-				min_d0 = std::min(min_d0, d4);
-
-				uint32_t min_d1 = (dist[0][1] + dist[1][0] + dist[2][0]) | 1;
-				uint32_t d5 = (dist[0][1] + dist[1][0] + dist[2][1]) | 5;
-				min_d1 = std::min(min_d1, d5);
-
-				uint32_t d2 = (dist[0][0] + dist[1][1] + dist[2][0]) | 2;
-				min_d0 = std::min(min_d0, d2);
-
-				uint32_t d3 = (dist[0][1] + dist[1][1] + dist[2][0]) | 3;
-				min_d1 = std::min(min_d1, d3);
-
-				uint32_t d6 = (dist[0][0] + dist[1][1] + dist[2][1]) | 6;
-				min_d0 = std::min(min_d0, d6);
-
-				uint32_t d7 = (dist[0][1] + dist[1][1] + dist[2][1]) | 7;
-				min_d1 = std::min(min_d1, d7);
-
-				uint32_t min_d = std::min(min_d0, min_d1);
-				uint32_t best_i = min_d & 7;
-
-				int delta_r = (best_i & 1) ? (max_r - avg_r) : (avg_r - min_r);
-				int delta_g = (best_i & 2) ? (max_g - avg_g) : (avg_g - min_g);
-				int delta_b = (best_i & 4) ? (max_b - avg_b) : (avg_b - min_b);
-
-				// Note: if delta_r/g/b==0, we actually want to choose a single color, so the block average color optimization kicks in.
-				if ((delta_r | delta_g | delta_b) != 0)
+			float k = maximum(fabsf(xr), fabsf(xg), fabsf(xb));
+			int saxis_r = 306, saxis_g = 601, saxis_b = 117;
+			if (k >= 2)
+			{
+				float m = 1024.0f / k;
+				saxis_r = (int)(xr * m);
+				saxis_g = (int)(xg * m);
+				saxis_b = (int)(xb * m);
+			}
+			
+			int low_dot = INT_MAX, high_dot = INT_MIN;
+			for (uint32_t i = 0; i < 16; i++)
+			{
+				int dot = pSrc_pixels[i].r * saxis_r + pSrc_pixels[i].g * saxis_g + pSrc_pixels[i].b * saxis_b;
+				if (dot < low_dot)
 				{
-					// Now we have a smaller AABB going from the block's average color to a cornerpoint of the larger AABB.
-					// Project all pixels colors along the 4 vectors going from a smaller AABB cornerpoint to the opposite cornerpoint, find largest projection.
-					// One of these vectors will be a decent approximation of the block's PCA.
-					const int saxis0_r = delta_r, saxis0_g = delta_g, saxis0_b = delta_b;
-
-					int low_dot0 = INT_MAX, high_dot0 = INT_MIN;
-					int low_dot1 = INT_MAX, high_dot1 = INT_MIN;
-					int low_dot2 = INT_MAX, high_dot2 = INT_MIN;
-					int low_dot3 = INT_MAX, high_dot3 = INT_MIN;
-
-					//int low_c0, low_c1, low_c2, low_c3;
-					//int high_c0, high_c1, high_c2, high_c3;
-
-					for (uint32_t i = 0; i < 16; i++)
-					{
-						const int dotx = pSrc_pixels[i].r * saxis0_r;
-						const int doty = pSrc_pixels[i].g * saxis0_g;
-						const int dotz = pSrc_pixels[i].b * saxis0_b;
-
-						const int dot0 = ((dotz + dotx + doty) << 4) + i;
-						const int dot1 = ((dotz - dotx - doty) << 4) + i;
-						const int dot2 = ((dotz - dotx + doty) << 4) + i;
-						const int dot3 = ((dotz + dotx - doty) << 4) + i;
-
-						if (dot0 < low_dot0)
-							low_dot0 = dot0;
-						if ((dot0 ^ 15) > high_dot0)
-							high_dot0 = dot0 ^ 15;
-
-						if (dot1 < low_dot1)
-							low_dot1 = dot1;
-						if ((dot1 ^ 15) > high_dot1)
-							high_dot1 = dot1 ^ 15;
-
-						if (dot2 < low_dot2)
-							low_dot2 = dot2;
-						if ((dot2 ^ 15) > high_dot2)
-							high_dot2 = dot2 ^ 15;
-
-						if (dot3 < low_dot3)
-							low_dot3 = dot3;
-						if ((dot3 ^ 15) > high_dot3)
-							high_dot3 = dot3 ^ 15;
-					}
-
-					low_c = low_dot0 & 15, high_c = ~high_dot0 & 15;
-					uint32_t r = (high_dot0 & ~15) - (low_dot0 & ~15);
-
-					uint32_t tr = (high_dot1 & ~15) - (low_dot1 & ~15);
-					if (tr > r)
-						low_c = low_dot1 & 15, high_c = ~high_dot1 & 15, r = tr;
-
-					tr = (high_dot2 & ~15) - (low_dot2 & ~15);
-					if (tr > r)
-						low_c = low_dot2 & 15, high_c = ~high_dot2 & 15, r = tr;
-
-					tr = (high_dot3 & ~15) - (low_dot3 & ~15);
-					if (tr > r)
-						low_c = low_dot3 & 15, high_c = ~high_dot3 & 15;
+					low_dot = dot;
+					low_c = i;
+				}
+				if (dot > high_dot)
+				{
+					high_dot = dot;
+					high_c = i;
 				}
 			}
 
@@ -1832,7 +1950,7 @@ namespace rgbcx
 				
 		uint32_t cur_err = 0;
 		
-		if (flags & cEncodeBC1UseLikelyTotalOrderings)
+		if (flags & (cEncodeBC1UseLikelyTotalOrderings | cEncodeBC1Use3ColorBlocksForBlackPixels))
 			cur_err = bc1_find_sels_err(pSrc_pixels, lr, lg, lb, hr, hg, hb, sels);
 		else
 			bc1_find_sels(pSrc_pixels, lr, lg, lb, hr, hg, hb, sels);
@@ -1864,7 +1982,7 @@ namespace rgbcx
 			if ((lr == trial_lr) && (lg == trial_lg) && (lb == trial_lb) && (hr == trial_hr) && (hg == trial_hg) && (hb == trial_hb))
 				break;
 
-			if (flags & cEncodeBC1UseLikelyTotalOrderings)
+			if (flags & (cEncodeBC1UseLikelyTotalOrderings | cEncodeBC1Use3ColorBlocksForBlackPixels))
 			{
 				uint8_t trial_sels[16];
 				uint32_t trial_err = bc1_find_sels_err(pSrc_pixels, trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb, trial_sels, cur_err);
@@ -1995,6 +2113,12 @@ namespace rgbcx
 
 			} // s
 
+		}
+
+		if ((cur_err) && (any_black_pixels) && (flags & cEncodeBC1Use3ColorBlocksForBlackPixels))
+		{
+			if (try_3color_block(pDst, pSrc_pixels, flags, cur_err))
+				return;
 		}
 
 		uint32_t lc16 = bc1_block::pack_unscaled_color(lr, lg, lb);
@@ -2238,6 +2362,9 @@ namespace rgbcx
 	void encode_bc3(void* pDst, const uint8_t* pPixels, uint32_t flags, uint32_t total_orderings_to_try)
 	{
 		assert(g_initialized);
+
+		// 3-color blocks are not allowed with BC3 (on most GPU's).
+		flags &= ~cEncodeBC1Use3ColorBlocksForBlackPixels;
 
 		encode_bc4(pDst, pPixels + 3, 4);
 		encode_bc1(static_cast<uint8_t*>(pDst) + 8, pPixels, flags, total_orderings_to_try);

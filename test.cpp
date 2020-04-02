@@ -44,7 +44,7 @@ static int print_usage()
 	fprintf(stderr, "-5 Encode to BC5\n");
 	fprintf(stderr, "-X# Set first BC4/5 color channel (defaults to 0 or red)\n");
 	fprintf(stderr, "-Y# Set second BC4/5 color channel (defaults to 1 or green)\n");
-	fprintf(stderr, "-c Use approximate integer PCA for BC1/3, instead of accurate PCA\n");
+	fprintf(stderr, "-b BC1: OK to use 3-color mode for blocks containing black or very dark pixels. (Important: engine/shader MUST ignore texture alpha if this flag is enabled!)\n");
 		
 	return EXIT_FAILURE;
 }
@@ -434,7 +434,7 @@ int main(int argc, char *argv[])
 	uint32_t bc45_channel0 = 0;
 	uint32_t bc45_channel1 = 1;
 	bool out_same_dir = false;
-	bool approx_bc1_pca = false;
+	bool use_bc1_3color_mode_for_black = false;
 
 	DXGI_FORMAT dxgi_format = DXGI_FORMAT_BC7_UNORM;
 	uint32_t pixel_format_bpp = 8;
@@ -456,6 +456,7 @@ int main(int argc, char *argv[])
 				case '3':
 				{
 					dxgi_format = DXGI_FORMAT_BC3_UNORM;
+					pixel_format_bpp = 8;
 					printf("Compressing to BC3\n");
 					break;
 				}
@@ -469,6 +470,7 @@ int main(int argc, char *argv[])
 				case '5':
 				{
 					dxgi_format = DXGI_FORMAT_BC5_UNORM;
+					pixel_format_bpp = 8;
 					printf("Compressing to BC5\n");
 					break;
 				}
@@ -538,9 +540,9 @@ int main(int argc, char *argv[])
 					out_same_dir = true;
 					break;
 				}
-				case 'c':
+				case 'b':
 				{
-					approx_bc1_pca = true;
+					use_bc1_3color_mode_for_black = true;
 					break;
 				}
 				default:
@@ -671,13 +673,13 @@ int main(int argc, char *argv[])
 		break;
 	}
 
-	if (approx_bc1_pca)
-		rgbcx_flags &= ~rgbcx::cEncodeBC1UsePCA;
+	if (use_bc1_3color_mode_for_black)
+		rgbcx_flags |= rgbcx::cEncodeBC1Use3ColorBlocksForBlackPixels;
 	
 	if (dxgi_format == DXGI_FORMAT_BC7_UNORM)
 		printf("Max mode 1 partitions: %u, uber level: %u, perceptual: %u\n", pack_params.m_max_partitions_mode, pack_params.m_uber_level, perceptual);
 	else
-		printf("Uber level: %u, flags: 0x%X, total orderings to try: %u \n", pack_params.m_uber_level, rgbcx_flags, rgbcx_total_orderings_to_try);
+		printf("Uber level: %u, flags: 0x%X, total orderings to try: %u, using 3-color mode: %u\n", pack_params.m_uber_level, rgbcx_flags, rgbcx_total_orderings_to_try, use_bc1_3color_mode_for_black);
 
 	bc7enc_compress_block_init();
 	rgbcx::encode_bc1_init();
