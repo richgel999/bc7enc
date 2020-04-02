@@ -1670,6 +1670,8 @@ namespace rgbcx
 	// This is a rather weak 3-color block encoder. But it's valuable in those cases where the 4-color mode is especially bad.
 	static bool try_3color_block(void *pDst, const color32* pSrc_pixels, uint32_t flags, uint32_t cur_err)
 	{
+		(void)flags;
+
 		int total_r = 0, total_g = 0, total_b = 0;
 		int max_r = 0, max_g = 0, max_b = 0;
 		int min_r = 255, min_g = 255, min_b = 255;
