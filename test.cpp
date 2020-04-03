@@ -699,7 +699,7 @@ int main(int argc, char *argv[])
 		printf("Max mode 1 partitions: %u, uber level: %u, perceptual: %u\n", pack_params.m_max_partitions_mode, pack_params.m_uber_level, perceptual);
 	else
 		printf("Uber level: %u, flags: 0x%X, total orderings to try: %u, using 3-color mode for black: %u, use 3-color mode: %u, balance NV error: %u\n", 
-			pack_params.m_uber_level, rgbcx_flags, rgbcx_total_orderings_to_try, use_bc1_3color_mode_for_black,
+			uber_level, rgbcx_flags, rgbcx_total_orderings_to_try, use_bc1_3color_mode_for_black,
 			use_bc1_3color_mode, balance_nv_error);
 
 	bc7enc_compress_block_init();
