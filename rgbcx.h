@@ -21,10 +21,18 @@
 namespace rgbcx
 {
 	// Encode_bc1_init() MUST be called once before using the BC1 encoder.
-	void encode_bc1_init();
+	//
+	// If balance_nv_error is true, the BC1 solid color tables will be slightly biased towards NVidia's hardware BC1 approximation. 
+	// The resulting encoded textures should still look good on non-NV hardware, or when decoded with software decoders.
+	// This reduces error on NV hardware, but slightly increases error using the "ideal" BC1 interpolation formulas (which everyone uses in software).
+	// Average RGB PSNR across 100 test textures:
+	// Unbalanced: NVidia BC1: 36.73 Ideal BC1: 37.03
+	// Balanced: NVidia BC1: 36.88 Ideal BC1: 36.89
+	// When benchmarking the encoder in software against other BC1 encoders, you should set this to false unless you are explictly testing with NVidia's BC1 decoder formulas (which you should be along with the ideal formulas).
+	void encode_bc1_init(bool balance_nv_error);
 
 	// Optimally encodes a solid color block to BC1 format.
-	void encode_bc1_solid_block(void* pDst, uint32_t fr, uint32_t fg, uint32_t fb);
+	void encode_bc1_solid_block(void* pDst, uint32_t fr, uint32_t fg, uint32_t fb, bool allow_3color);
 
 	enum
 	{
@@ -32,13 +40,19 @@ namespace rgbcx
 		cEncodeBC1UseLikelyTotalOrderings = 2,
 		
 		// Use 2 least squares pass, instead of one (same as stb_dxt's HIGHQUAL option).
+		// Recommended if you're enabling cEncodeBC1UseLikelyTotalOrderings.
 		cEncodeBC1HighQuality = 4,
-
+				
 		// cEncodeBC1Use3ColorBlocksForBlackPixels allows the BC1 encoder to use 3-color blocks for blocks containing black or very dark pixels. 
 		// You shader/engine MUST ignore the alpha channel on textures encoded with this flag.
 		// Average quality goes up substantially for my 100 texture corpus (.5 dB), so it's worth using if you can.
 		// Note the BC1 encoder does not actually support transparency in 3-color mode.
-		cEncodeBC1Use3ColorBlocksForBlackPixels = 8
+		// Don't set when encoding to BC3. Recommended for BC1.
+		cEncodeBC1Use3ColorBlocksForBlackPixels = 8,
+
+		// If cEncodeBC1Use3ColorBlocks is set, the encoder can use 3-color mode on solid color blocks. 
+		// Don't set when encoding to BC3. Recommended for BC1.
+		cEncodeBC1Use3ColorBlocks = 16
 	};
 
 	// Level 0 is similar to stb_dxt default quality.
@@ -1266,40 +1280,101 @@ namespace rgbcx
 	{
 		uint8_t m_hi;
 		uint8_t m_lo;
+		uint8_t m_e;
 	};
 
-	static bc1_match_entry g_bc1_match5_equals_1[256], g_bc1_match6_equals_1[256]; // selector 1, allow equals hi/lo
+	static bc1_match_entry g_bc1_match5_equals_1[256], g_bc1_match6_equals_1[256];
+	static bc1_match_entry g_bc1_match5_half[256], g_bc1_match6_half[256]; 
 
-	static void prepare_bc1_single_color_table(bc1_match_entry* pTable, const uint8_t* pExpand, int size0, int size1, int sel)
+	static inline int scale_5_to_8_nv(int v) { return (3 * v * 22) / 8; }
+	static inline int scale_6_to_8_nv(int v) { return (v << 2) | (v >> 4); }
+	static inline int interp_5_nv(int v0, int v1) {	return ((2 * v0 + v1) * 22) / 8; }
+	static inline int interp_6_nv(int c0, int c1) {	const int gdiff = c1 - c0; return (256 * c0 + (gdiff / 4) + 128 + gdiff * 80) / 256; }
+
+	static inline int interp_half_5_nv(int r0, int r1) { return ((r0 + r1) * 33) / 8; }
+	static inline int interp_half_6_nv(int c0, int c1) { const int gdiff = c1 - c0; return (256 * c0 + gdiff/4 + 128 + gdiff * 128) / 256; }
+
+	static void prepare_bc1_single_color_table_half(bc1_match_entry* pTable, const uint8_t* pExpand, int size, bool balance_nv_error)
 	{
 		for (int i = 0; i < 256; i++)
 		{
 			int lowest_e = 256;
-			for (int lo = 0; lo < size0; lo++)
+			for (int lo = 0; lo < size; lo++)
 			{
-				for (int hi = 0; hi < size1; hi++)
+				const int c1 = (size == 32) ? scale_5_to_8_nv(lo) : scale_6_to_8_nv(lo);
+
+				for (int hi = 0; hi < size; hi++)
 				{
 					const int lo_e = pExpand[lo], hi_e = pExpand[hi];
-					int e;
 
-					if (sel == 1)
-					{
-						// Selector 1
-						e = iabs(((hi_e * 2 + lo_e) / 3) - i);
-						e += (iabs(hi_e - lo_e) * 3) / 100;
-					}
+					const int c0 = (size == 32) ? scale_5_to_8_nv(hi) : scale_6_to_8_nv(hi);
+
+					const int v_nv = (size == 32) ? interp_half_5_nv(hi, lo) : interp_half_6_nv(c0, c1);
+
+					const int v_ideal = (hi_e + lo_e) / 2;
+
+					int v;
+					if (balance_nv_error)
+						v = (v_nv + v_ideal + 1) / 2;
 					else
-					{
-						assert(sel == 0);
+						v = v_ideal;
+					
+					int e = iabs(v - i);
 
-						// Selector 0
-						e = iabs(hi_e - i);
-					}
+					e += (iabs(hi_e - lo_e) * 3) / 100;
 
 					if (e < lowest_e)
 					{
 						pTable[i].m_hi = static_cast<uint8_t>(hi);
 						pTable[i].m_lo = static_cast<uint8_t>(lo);
+						
+						assert(e <= UINT8_MAX);
+						pTable[i].m_e = static_cast<uint8_t>(e);
+
+						lowest_e = e;
+					}
+
+				} // hi
+			} // lo
+		}
+	}
+
+	static void prepare_bc1_single_color_table(bc1_match_entry* pTable, const uint8_t* pExpand, int size, bool balance_nv_error)
+	{
+		for (int i = 0; i < 256; i++)
+		{
+			int lowest_e = 256;
+			for (int lo = 0; lo < size; lo++)
+			{
+				const int c1 = (size == 32) ? scale_5_to_8_nv(lo) : scale_6_to_8_nv(lo);
+
+				for (int hi = 0; hi < size; hi++)
+				{
+					const int lo_e = pExpand[lo], hi_e = pExpand[hi];
+
+					const int c0 = (size == 32) ? scale_5_to_8_nv(hi) : scale_6_to_8_nv(hi);
+
+					const int v_nv = (size == 32) ? interp_5_nv(hi, lo) : interp_6_nv(c0, c1);
+
+					const int v_ideal = (hi_e * 2 + lo_e) / 3;
+
+					int v;
+					if (balance_nv_error)
+						v = (v_nv + v_ideal + 1) / 2;
+					else
+						v = v_ideal;
+					
+					int e = iabs(v - i);
+
+					e += (iabs(hi_e - lo_e) * 3) / 100;
+
+					if (e < lowest_e)
+					{
+						pTable[i].m_hi = static_cast<uint8_t>(hi);
+						pTable[i].m_lo = static_cast<uint8_t>(lo);
+						
+						assert(e <= UINT8_MAX);
+						pTable[i].m_e = static_cast<uint8_t>(e);
 
 						lowest_e = e;
 					}
@@ -1337,7 +1412,7 @@ namespace rgbcx
 
 	static bool g_initialized;
 		
-	void encode_bc1_init()
+	void encode_bc1_init(bool balance_nv_error)
 	{
 		if (g_initialized)
 			return;
@@ -1345,12 +1420,14 @@ namespace rgbcx
 		uint8_t bc1_expand5[32];
 		for (int i = 0; i < 32; i++)
 			bc1_expand5[i] = static_cast<uint8_t>((i << 3) | (i >> 2));
-		prepare_bc1_single_color_table(g_bc1_match5_equals_1, bc1_expand5, 32, 32, 1);
+		prepare_bc1_single_color_table(g_bc1_match5_equals_1, bc1_expand5, 32, balance_nv_error);
+		prepare_bc1_single_color_table_half(g_bc1_match5_half, bc1_expand5, 32, balance_nv_error);
 
 		uint8_t bc1_expand6[64];
 		for (int i = 0; i < 64; i++)
 			bc1_expand6[i] = static_cast<uint8_t>((i << 2) | (i >> 4));
-		prepare_bc1_single_color_table(g_bc1_match6_equals_1, bc1_expand6, 64, 64, 1);
+		prepare_bc1_single_color_table(g_bc1_match6_equals_1, bc1_expand6, 64, balance_nv_error);
+		prepare_bc1_single_color_table_half(g_bc1_match6_half, bc1_expand6, 64, balance_nv_error);
 
 		for (uint32_t i = 0; i < NUM_UNIQUE_TOTAL_ORDERINGS; i++)
 		{
@@ -1369,40 +1446,60 @@ namespace rgbcx
 		g_initialized = true;
 	}
 	
-	void encode_bc1_solid_block(void* pDst, uint32_t fr, uint32_t fg, uint32_t fb) 
+	void encode_bc1_solid_block(void* pDst, uint32_t fr, uint32_t fg, uint32_t fb, bool allow_3color) 
 	{
 		bc1_block* pDst_block = static_cast<bc1_block*>(pDst);
 
 		uint32_t mask = 0xAA;
-		uint32_t max16 = (g_bc1_match5_equals_1[fr].m_hi << 11) | (g_bc1_match6_equals_1[fg].m_hi << 5) | g_bc1_match5_equals_1[fb].m_hi;
-		uint32_t min16 = (g_bc1_match5_equals_1[fr].m_lo << 11) | (g_bc1_match6_equals_1[fg].m_lo << 5) | g_bc1_match5_equals_1[fb].m_lo;
+		int max16 = -1, min16 = 0;
 
-		if (min16 == max16)
+		if (allow_3color)
 		{
-			// Always forbid 3 color blocks
-			// This is to guarantee that BC3 blocks never use punchthrough alpha (3 color) mode, which isn't supported on some (all?) GPU's.
-			mask = 0;
+			const uint32_t err4 = g_bc1_match5_equals_1[fr].m_e + g_bc1_match6_equals_1[fg].m_e + g_bc1_match5_equals_1[fb].m_e;
+			const uint32_t err3 = g_bc1_match5_half[fr].m_e + g_bc1_match6_half[fg].m_e + g_bc1_match5_half[fb].m_e;
 
-			// Make l > h
-			if (min16 > 0)
-				min16--;
-			else
+			if (err3 < err4)
 			{
-				// l = h = 0
-				assert(min16 == max16 && max16 == 0);
+				max16 = (g_bc1_match5_half[fr].m_hi << 11) | (g_bc1_match6_half[fg].m_hi << 5) | g_bc1_match5_half[fb].m_hi;
+				min16 = (g_bc1_match5_half[fr].m_lo << 11) | (g_bc1_match6_half[fg].m_lo << 5) | g_bc1_match5_half[fb].m_lo;
 
-				max16 = 1;
-				min16 = 0;
-				mask = 0x55;
+				if (max16 > min16)
+					std::swap(max16, min16);
 			}
-
-			assert(max16 > min16);
 		}
 
-		if (max16 < min16)
+		if (max16 == -1)
 		{
-			std::swap(max16, min16);
-			mask ^= 0x55;
+			max16 = (g_bc1_match5_equals_1[fr].m_hi << 11) | (g_bc1_match6_equals_1[fg].m_hi << 5) | g_bc1_match5_equals_1[fb].m_hi;
+			min16 = (g_bc1_match5_equals_1[fr].m_lo << 11) | (g_bc1_match6_equals_1[fg].m_lo << 5) | g_bc1_match5_equals_1[fb].m_lo;
+
+			if (min16 == max16)
+			{
+				// Always forbid 3 color blocks
+				// This is to guarantee that BC3 blocks never use punchthrough alpha (3 color) mode, which isn't supported on some (all?) GPU's.
+				mask = 0;
+
+				// Make l > h
+				if (min16 > 0)
+					min16--;
+				else
+				{
+					// l = h = 0
+					assert(min16 == max16 && max16 == 0);
+
+					max16 = 1;
+					min16 = 0;
+					mask = 0x55;
+				}
+
+				assert(max16 > min16);
+			}
+
+			if (max16 < min16)
+			{
+				std::swap(max16, min16);
+				mask ^= 0x55;
+			}
 		}
 
 		pDst_block->set_low_color(static_cast<uint16_t>(max16));
@@ -1843,7 +1940,7 @@ namespace rgbcx
 
 		if (j == 16)
 		{
-			encode_bc1_solid_block(pDst, fr, fg, fb);
+			encode_bc1_solid_block(pDst, fr, fg, fb, (flags & cEncodeBC1Use3ColorBlocks) != 0);
 			return;
 		}
 				
@@ -2366,7 +2463,7 @@ namespace rgbcx
 		assert(g_initialized);
 
 		// 3-color blocks are not allowed with BC3 (on most GPU's).
-		flags &= ~cEncodeBC1Use3ColorBlocksForBlackPixels;
+		flags &= ~(cEncodeBC1Use3ColorBlocksForBlackPixels | cEncodeBC1Use3ColorBlocks);
 
 		encode_bc4(pDst, pPixels + 3, 4);
 		encode_bc1(static_cast<uint8_t*>(pDst) + 8, pPixels, flags, total_orderings_to_try);

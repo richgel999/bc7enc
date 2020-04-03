@@ -30,11 +30,11 @@ static int print_usage()
 	fprintf(stderr, "bc7enc\n");
 	fprintf(stderr, "Reads PNG files (with or without alpha channels) and packs them to BC1-5 or BC7/BPTC using\nmodes 1, 6 (opaque blocks) or modes 1, 5, 6, and 7 (alpha blocks).\n");
 	fprintf(stderr, "By default, a DX10 DDS file and a unpacked PNG file will be written to the current\ndirectory with the .dds/_unpacked.png/_unpacked_alpha.png suffixes.\n\n");
-	fprintf(stderr, "Usage: bc7enc [-apng_filename] [-l] [-uX] [-aX] [-g] [-y] input_filename.png [compressed_output.dds] [unpacked_output.png]\n");
+	fprintf(stderr, "Usage: bc7enc [-apng_filename] [options] input_filename.png [compressed_output.dds] [unpacked_output.png]\n\n");
 	fprintf(stderr, "-apng_filename Load G channel of PNG file into alpha channel of source image\n");
 	fprintf(stderr, "-l Use linear colorspace metrics instead of perceptual\n");
 	fprintf(stderr, "-uX Higher quality levels, X ranges from [0,4] (BC7) or [0,5] (BC1-5), higher=slower\n");
-	fprintf(stderr, "-pX Scan X partitions in mode 1, X ranges from [0,64], use 0 to disable mode 1 entirely (faster)\n");
+	fprintf(stderr, "-pX BC7: Scan X partitions in mode 1, X ranges from [0,64], use 0 to disable mode 1 entirely (faster)\n");
 	fprintf(stderr, "-g Don't write unpacked output PNG files (this disables PSNR metrics too).\n");
 	fprintf(stderr, "-y Flip source image along Y axis before packing\n");
 	fprintf(stderr, "-o Write output files in same directory as source files\n");
@@ -44,7 +44,9 @@ static int print_usage()
 	fprintf(stderr, "-5 Encode to BC5\n");
 	fprintf(stderr, "-X# Set first BC4/5 color channel (defaults to 0 or red)\n");
 	fprintf(stderr, "-Y# Set second BC4/5 color channel (defaults to 1 or green)\n");
-	fprintf(stderr, "-b BC1: OK to use 3-color mode for blocks containing black or very dark pixels. (Important: engine/shader MUST ignore texture alpha if this flag is enabled!)\n");
+	fprintf(stderr, "-b BC1: Enable 3-color mode for blocks containing black or very dark pixels. (Important: engine/shader MUST ignore decoded texture alpha if this flag is enabled!)\n");
+	fprintf(stderr, "-c BC1: Disable 3-color mode for solid color blocks\n");
+	fprintf(stderr, "-n BC1: Enable balancing decoding error between ideal and NVidia hardware BC1 decoding (textures still usable on parts from other vendors)\n");
 		
 	return EXIT_FAILURE;
 }
@@ -426,14 +428,19 @@ int main(int argc, char *argv[])
 	std::string dds_output_filename;
 	std::string png_output_filename;
 	std::string png_alpha_output_filename;
+
+	bool no_output_png = false;
+	bool out_same_dir = false;
+
 	int uber_level = 0;
 	int max_partitions_to_scan = BC7ENC_MAX_PARTITIONS1;
 	bool perceptual = true;
-	bool no_output_png = false;
 	bool y_flip = false;
 	uint32_t bc45_channel0 = 0;
 	uint32_t bc45_channel1 = 1;
-	bool out_same_dir = false;
+	
+	bool balance_nv_error = false;
+	bool use_bc1_3color_mode = true;
 	bool use_bc1_3color_mode_for_black = false;
 
 	DXGI_FORMAT dxgi_format = DXGI_FORMAT_BC7_UNORM;
@@ -535,6 +542,11 @@ int main(int argc, char *argv[])
 					}
 					break;
 				}
+				case 'n':
+				{
+					balance_nv_error = true;
+					break;
+				}
 				case 'o':
 				{
 					out_same_dir = true;
@@ -543,6 +555,11 @@ int main(int argc, char *argv[])
 				case 'b':
 				{
 					use_bc1_3color_mode_for_black = true;
+					break;
+				}
+				case 'c':
+				{
+					use_bc1_3color_mode = false;
 					break;
 				}
 				default:
@@ -675,14 +692,18 @@ int main(int argc, char *argv[])
 
 	if (use_bc1_3color_mode_for_black)
 		rgbcx_flags |= rgbcx::cEncodeBC1Use3ColorBlocksForBlackPixels;
+	if (use_bc1_3color_mode)
+		rgbcx_flags |= rgbcx::cEncodeBC1Use3ColorBlocks;
 	
 	if (dxgi_format == DXGI_FORMAT_BC7_UNORM)
 		printf("Max mode 1 partitions: %u, uber level: %u, perceptual: %u\n", pack_params.m_max_partitions_mode, pack_params.m_uber_level, perceptual);
 	else
-		printf("Uber level: %u, flags: 0x%X, total orderings to try: %u, using 3-color mode: %u\n", pack_params.m_uber_level, rgbcx_flags, rgbcx_total_orderings_to_try, use_bc1_3color_mode_for_black);
+		printf("Uber level: %u, flags: 0x%X, total orderings to try: %u, using 3-color mode for black: %u, use 3-color mode: %u, balance NV error: %u\n", 
+			pack_params.m_uber_level, rgbcx_flags, rgbcx_total_orderings_to_try, use_bc1_3color_mode_for_black,
+			use_bc1_3color_mode, balance_nv_error);
 
 	bc7enc_compress_block_init();
-	rgbcx::encode_bc1_init();
+	rgbcx::encode_bc1_init(balance_nv_error);
 
 	bool has_alpha = false;
 
