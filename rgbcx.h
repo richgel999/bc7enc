@@ -1,4 +1,4 @@
-// rgbcx.h
+// rgbcx.h v1.02
 // High-performance scalar BC1-5 encoders. Public Domain or MIT license (you choose - see below), written by Richard Geldreich 2020 <richgel99@gmail.com>.
 // Influential references:
 // http://sjbrown.co.uk/2006/01/19/dxt-compression-techniques/
@@ -43,15 +43,15 @@ namespace rgbcx
 		// Recommended if you're enabling cEncodeBC1UseLikelyTotalOrderings.
 		cEncodeBC1HighQuality = 4,
 				
-		// cEncodeBC1Use3ColorBlocksForBlackPixels allows the BC1 encoder to use 3-color blocks for blocks containing black or very dark pixels. 
+		// cEncodeBC1Use3ColorBlocksForBlackPixels allows the BC1 encoder to use 3-color blocks for blocks containing black or very dark pixels. This drops perf.
 		// You shader/engine MUST ignore the alpha channel on textures encoded with this flag.
 		// Average quality goes up substantially for my 100 texture corpus (.5 dB), so it's worth using if you can.
 		// Note the BC1 encoder does not actually support transparency in 3-color mode.
-		// Don't set when encoding to BC3. Recommended for BC1.
+		// Don't set when encoding to BC3.
 		cEncodeBC1Use3ColorBlocksForBlackPixels = 8,
 
-		// If cEncodeBC1Use3ColorBlocks is set, the encoder can use 3-color mode on solid color blocks. 
-		// Don't set when encoding to BC3. Recommended for BC1.
+		// If cEncodeBC1Use3ColorBlocks is set, the encoder can use 3-color mode for a small gain in quality, but lower perf.
+		// Don't set when encoding to BC3.
 		cEncodeBC1Use3ColorBlocks = 16
 	};
 
@@ -73,10 +73,10 @@ namespace rgbcx
 	const uint32_t DEFAULT_TOTAL_ORDERINGS_TO_TRY = 10;
 		
 	// Encodes a block of 4x4 pixels to BC1 format. 
-	// Always returns a 4 color block, unless cEncodeBC1Use3ColorBlocksForBlackPixels is specified. This flag allows the encoder to use the 3-color+transparent black mode on blocks with very dark or black pixels.
 	// No transparency supported.
+	// Always returns a 4 color block, unless cEncodeBC1Use3ColorBlocksForBlackPixels or cEncodeBC1Use3ColorBlock flags are specified. 
 	// total_orderings_to_try controls the perf. vs. quality tradeoff when the cEncodeBC1UseLikelyTotalOrderings flag is used.
-	// The pixels are in RGBA format, where R is first in memory. The BC1 encoder ignores the alpha channel.
+	// The pixels are in RGBA format, where R is first in memory. The BC1 encoder completely ignores the alpha channel (i.e. there is no punchthrough alpha support).
 	void encode_bc1(void* pDst, const uint8_t* pPixels, uint32_t flags = DEFAULT_OPTIONS, uint32_t total_orderings_to_try = DEFAULT_TOTAL_ORDERINGS_TO_TRY);
 
 	void encode_bc4(void* pDst, const uint8_t* pPixels, uint32_t stride = 4);
@@ -1387,7 +1387,7 @@ namespace rgbcx
 	// This table is: 9 * (w * w), 9 * ((1.0f - w) * w), 9 * ((1.0f - w) * (1.0f - w))
 	// where w is [0,1/3,2/3,1]. 9 is the perfect multiplier.
 	static const uint32_t s_weight_vals[4] = { 0x000009, 0x010204, 0x040201, 0x090000 };
-
+		
 	static inline void compute_selector_factors(const hist &h, float &iz00, float &iz10, float &iz11)
 	{
 		uint32_t weight_accum = 0;
@@ -1592,6 +1592,72 @@ namespace rgbcx
 		return true;
 	}
 
+	static inline bool compute_least_squares_endpoints3_rgb(bool use_black, const color32* pColors, const uint8_t* pSelectors, vec3F* pXl, vec3F* pXh)
+	{
+		int uq00_r = 0, uq00_g = 0, uq00_b = 0;
+		uint32_t weight_accum = 0;
+		int total_r = 0, total_g = 0, total_b = 0;
+		for (uint32_t i = 0; i < 16; i++)
+		{
+			const uint8_t r = pColors[i].c[0], g = pColors[i].c[1], b = pColors[i].c[2];
+			if (use_black)
+			{
+				if ((r | g | b) < 4)
+					continue;
+			}
+
+			const uint8_t sel = pSelectors[i];
+			assert(sel <= 3);
+			if (sel == 3)
+				continue;
+			
+			static const uint32_t s_weight_vals_3[3] = { 0x000004, 0x040000, 0x010101 };
+			weight_accum += s_weight_vals_3[sel];
+
+			static const uint8_t s_tran[3] = { 0, 2, 1 };
+			const uint8_t tsel = s_tran[sel];
+			uq00_r += tsel * r;
+			uq00_g += tsel * g;
+			uq00_b += tsel * b;
+
+			total_r += r;
+			total_g += g;
+			total_b += b;
+		}
+
+		int q10_r = total_r * 2 - uq00_r;
+		int q10_g = total_g * 2 - uq00_g;
+		int q10_b = total_b * 2 - uq00_b;
+
+		float z00 = (float)((weight_accum >> 16) & 0xFF);
+		float z10 = (float)((weight_accum >> 8) & 0xFF);
+		float z11 = (float)(weight_accum & 0xFF);
+		float z01 = z10;
+
+		float det = z00 * z11 - z01 * z10;
+		if (fabs(det) < 1e-8f)
+			return false;
+
+		det = (2.0f / 255.0f) / det;
+
+		float iz00, iz01, iz10, iz11;
+		iz00 = z11 * det;
+		iz01 = -z01 * det;
+		iz10 = -z10 * det;
+		iz11 = z00 * det;
+
+		pXl->c[0] = iz00 * (float)uq00_r + iz01 * q10_r;
+		pXh->c[0] = iz10 * (float)uq00_r + iz11 * q10_r;
+
+		pXl->c[1] = iz00 * (float)uq00_g + iz01 * q10_g;
+		pXh->c[1] = iz10 * (float)uq00_g + iz11 * q10_g;
+
+		pXl->c[2] = iz00 * (float)uq00_b + iz01 * q10_b;
+		pXh->c[2] = iz10 * (float)uq00_b + iz11 * q10_b;
+
+		return true;
+	}
+
 	static inline void bc1_find_sels(const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16])
 	{
 		uint32_t block_r[4], block_g[4], block_b[4];
@@ -1678,7 +1744,7 @@ namespace rgbcx
 		return total_err;
 	}
 
-	static inline uint32_t bc1_find_sels3_err(const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16], uint32_t cur_err = UINT32_MAX)
+	static inline uint32_t bc1_find_sels3_err(bool use_black, const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16], uint32_t cur_err = UINT32_MAX)
 	{
 		uint32_t block_r[3], block_g[3], block_b[3];
 
@@ -1711,11 +1777,14 @@ namespace rgbcx
 				best_sel = 2;
 			}
 
-			uint32_t err3 = squarei(r) + squarei(g) + squarei(b);
-			if (err3 < best_err)
+			if (use_black)
 			{
-				best_err = err3;
-				best_sel = 3;
+				uint32_t err3 = squarei(r) + squarei(g) + squarei(b);
+				if (err3 < best_err)
+				{
+					best_err = err3;
+					best_sel = 3;
+				}
 			}
 			
 			total_err += best_err;
@@ -1763,21 +1832,23 @@ namespace rgbcx
 		trial_hg = (trial_hg + (xh.c[1] > g_midpoint6[trial_hg])) & 63;
 		trial_hb = (trial_hb + (xh.c[2] > g_midpoint5[trial_hb])) & 31;
 	}
-
-	// This is a rather weak 3-color block encoder. But it's valuable in those cases where the 4-color mode is especially bad.
+		
 	static bool try_3color_block(void *pDst, const color32* pSrc_pixels, uint32_t flags, uint32_t cur_err)
 	{
-		(void)flags;
+		const bool use_black = (flags & cEncodeBC1Use3ColorBlocksForBlackPixels) != 0;
 
 		int total_r = 0, total_g = 0, total_b = 0;
 		int max_r = 0, max_g = 0, max_b = 0;
 		int min_r = 255, min_g = 255, min_b = 255;
 		int total_pixels = 0;
-		for (uint32_t i = 1; i < 16; i++)
+		for (uint32_t i = 0; i < 16; i++)
 		{
 			const int r = pSrc_pixels[i].r, g = pSrc_pixels[i].g, b = pSrc_pixels[i].b;
-			if ((r | g | b) < 4)
-				continue;
+			if (use_black)
+			{
+				if ((r | g | b) < 4)
+					continue;
+			}
 			
 			max_r = std::max(max_r, r); max_g = std::max(max_g, g); max_b = std::max(max_b, b);
 			min_r = std::min(min_r, r); min_g = std::min(min_g, g); min_b = std::min(min_b, b);
@@ -1803,8 +1874,11 @@ namespace rgbcx
 			int g = (int)pSrc_pixels[i].g;
 			int b = (int)pSrc_pixels[i].b;
 
-			if ((r | g | b) < 4)
-				continue;
+			if (use_black)
+			{
+				if ((r | g | b) < 4)
+					continue;
+			}
 
 			r -= avg_r;
 			g -= avg_g;
@@ -1848,8 +1922,11 @@ namespace rgbcx
 		{
 			int r = (int)pSrc_pixels[i].r, g = (int)pSrc_pixels[i].g, b = (int)pSrc_pixels[i].b;
 
-			if ((r | g | b) < 4)
-				continue;
+			if (use_black)
+			{
+				if ((r | g | b) < 4)
+					continue;
+			}
 
 			int dot = r * saxis_r + g * saxis_g + b * saxis_b;
 			if (dot < low_dot)
@@ -1873,7 +1950,27 @@ namespace rgbcx
 		int hb = to_5(pSrc_pixels[high_c].b);
 
 		uint8_t trial_sels[16];
-		uint32_t trial_err = bc1_find_sels3_err(pSrc_pixels, lr, lg, lb, hr, hg, hb, trial_sels, cur_err);
+		uint32_t trial_err = bc1_find_sels3_err(use_black, pSrc_pixels, lr, lg, lb, hr, hg, hb, trial_sels, UINT32_MAX);
+
+		if (trial_err)
+		{
+			vec3F xl, xh;
+			if (compute_least_squares_endpoints3_rgb(use_black, pSrc_pixels, trial_sels, &xl, &xh))
+			{
+				int lr2, lg2, lb2, hr2, hg2, hb2;
+				precise_round_565(xl, xh, lr2, lg2, lb2, hr2, hg2, hb2);
+				
+				uint8_t trial_sels2[16];
+				uint32_t trial_err2 = bc1_find_sels3_err(use_black, pSrc_pixels, lr2, lg2, lb2, hr2, hg2, hb2, trial_sels2, trial_err);
+												
+				if (trial_err2 < trial_err)
+				{
+					lr = lr2; lg = lg2; lb = lb2;
+					hr = hr2; hg = hg2; hb = hb2;
+					memcpy(trial_sels, trial_sels2, sizeof(trial_sels));
+				}
+			}
+		}
 
 		if (trial_err < cur_err)
 		{
@@ -1900,12 +1997,18 @@ namespace rgbcx
 				static const uint8_t s_sel_trans_inv[4] = { 1, 0, 2, 3 };
 				
 				for (uint32_t i = 0; i < 16; i++)
+				{
+					assert(use_black || trial_sels[i] != 3);
 					packed_sels |= ((uint32_t)s_sel_trans_inv[trial_sels[i]] << (i * 2));
+				}
 			}
 			else
 			{
 				for (uint32_t i = 0; i < 16; i++)
+				{
+					assert(use_black || trial_sels[i] != 3);
 					packed_sels |= ((uint32_t)trial_sels[i] << (i * 2));
+				}
 			}
 
 			pDst_block->m_selectors[0] = (uint8_t)packed_sels;
@@ -2048,8 +2151,10 @@ namespace rgbcx
 		}
 				
 		uint32_t cur_err = 0;
+		const bool needs_block_error = ((flags & (cEncodeBC1UseLikelyTotalOrderings | cEncodeBC1Use3ColorBlocks)) != 0) ||
+			(any_black_pixels && ((flags & cEncodeBC1Use3ColorBlocksForBlackPixels) != 0));
 		
-		if (flags & (cEncodeBC1UseLikelyTotalOrderings | cEncodeBC1Use3ColorBlocksForBlackPixels))
+		if (needs_block_error)
 			cur_err = bc1_find_sels_err(pSrc_pixels, lr, lg, lb, hr, hg, hb, sels);
 		else
 			bc1_find_sels(pSrc_pixels, lr, lg, lb, hr, hg, hb, sels);
@@ -2081,7 +2186,7 @@ namespace rgbcx
 			if ((lr == trial_lr) && (lg == trial_lg) && (lb == trial_lb) && (hr == trial_hr) && (hg == trial_hg) && (hb == trial_hb))
 				break;
 
-			if (flags & (cEncodeBC1UseLikelyTotalOrderings | cEncodeBC1Use3ColorBlocksForBlackPixels))
+			if (needs_block_error)
 			{
 				uint8_t trial_sels[16];
 				uint32_t trial_err = bc1_find_sels_err(pSrc_pixels, trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb, trial_sels, cur_err);
@@ -2117,6 +2222,8 @@ namespace rgbcx
 
 		if ((cur_err) && (flags & cEncodeBC1UseLikelyTotalOrderings))
 		{
+			assert(needs_block_error);
+
 			hist h;
 			for (uint32_t i = 0; i < 16; i++)
 				h.m_hist[sels[i]]++;
@@ -2214,10 +2321,16 @@ namespace rgbcx
 
 		}
 
-		if ((cur_err) && (any_black_pixels) && (flags & cEncodeBC1Use3ColorBlocksForBlackPixels))
+		if (cur_err) 
 		{
-			if (try_3color_block(pDst, pSrc_pixels, flags, cur_err))
-				return;
+			assert(needs_block_error);
+
+			if ( ((flags & cEncodeBC1Use3ColorBlocks) != 0) ||
+				  ((any_black_pixels) && ((flags & cEncodeBC1Use3ColorBlocksForBlackPixels) != 0)) )
+			{
+				if (try_3color_block(pDst, pSrc_pixels, flags, cur_err))
+					return;
+			}
 		}
 
 		uint32_t lc16 = bc1_block::pack_unscaled_color(lr, lg, lb);
