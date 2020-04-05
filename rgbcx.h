@@ -36,7 +36,7 @@ namespace rgbcx
 
 	enum
 	{
-		// Try to improve quality using the most likely total orderings. The total_orderings_to_try controls the number of total orderings to try.
+		// Try to improve quality using the most likely total orderings. The total_orderings_to_try parameter will then control the number of total orderings to try.
 		cEncodeBC1UseLikelyTotalOrderings = 2,
 		
 		// Use 2 least squares pass, instead of one (same as stb_dxt's HIGHQUAL option).
@@ -45,16 +45,17 @@ namespace rgbcx
 				
 		// cEncodeBC1Use3ColorBlocksForBlackPixels allows the BC1 encoder to use 3-color blocks for blocks containing black or very dark pixels. This drops perf.
 		// You shader/engine MUST ignore the alpha channel on textures encoded with this flag.
-		// Average quality goes up substantially for my 100 texture corpus (.5 dB), so it's worth using if you can.
+		// Average quality goes up substantially for my 100 texture corpus (~.5 dB), so it's worth using if you can.
 		// Note the BC1 encoder does not actually support transparency in 3-color mode.
 		// Don't set when encoding to BC3.
 		cEncodeBC1Use3ColorBlocksForBlackPixels = 8,
 
-		// If cEncodeBC1Use3ColorBlocks is set, the encoder can use 3-color mode for a small gain in quality, but lower perf.
+		// If cEncodeBC1Use3ColorBlocks is set, the encoder can use 3-color mode for a small but noticeable gain in quality, but lower perf.
 		// Don't set when encoding to BC3.
 		cEncodeBC1Use3ColorBlocks = 16,
 
 		// cEncodeBC1Iterative will greatly increase encode time, but is slightly higher quality.
+		// Same as squish's iterative cluster fit option.
 		cEncodeBC1Iterative = 32
 	};
 
