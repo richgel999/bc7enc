@@ -1,4 +1,4 @@
-// rgbcx.h v1.02
+// rgbcx.h v1.03
 // High-performance scalar BC1-5 encoders. Public Domain or MIT license (you choose - see below), written by Richard Geldreich 2020 <richgel99@gmail.com>.
 // Influential references:
 // http://sjbrown.co.uk/2006/01/19/dxt-compression-techniques/
@@ -1323,7 +1323,8 @@ namespace rgbcx
 
 					e += (iabs(hi_e - lo_e) * 3) / 100;
 
-					if (e < lowest_e)
+					// Favor equal endpoints, for lower error on actual GPU's which approximate the interpolation.
+					if ((e < lowest_e) || ((e == lowest_e) && (lo == hi)))
 					{
 						pTable[i].m_hi = static_cast<uint8_t>(hi);
 						pTable[i].m_lo = static_cast<uint8_t>(lo);
@@ -1368,7 +1369,8 @@ namespace rgbcx
 
 					e += (iabs(hi_e - lo_e) * 3) / 100;
 
-					if (e < lowest_e)
+					// Favor equal endpoints, for lower error on actual GPU's which approximate the interpolation.
+					if ((e < lowest_e) || ((e == lowest_e) && (lo == hi)))
 					{
 						pTable[i].m_hi = static_cast<uint8_t>(hi);
 						pTable[i].m_lo = static_cast<uint8_t>(lo);
@@ -1954,9 +1956,13 @@ namespace rgbcx
 
 		if (trial_err)
 		{
-			vec3F xl, xh;
-			if (compute_least_squares_endpoints3_rgb(use_black, pSrc_pixels, trial_sels, &xl, &xh))
+			const uint32_t total_ls_passes = flags & cEncodeBC1HighQuality ? 2 : 1;
+			for (uint32_t trials = 0; trials < total_ls_passes; trials++)
 			{
+				vec3F xl, xh;
+				if (!compute_least_squares_endpoints3_rgb(use_black, pSrc_pixels, trial_sels, &xl, &xh))
+					break;
+
 				int lr2, lg2, lb2, hr2, hg2, hb2;
 				precise_round_565(xl, xh, lr2, lg2, lb2, hr2, hg2, hb2);
 				
@@ -1965,10 +1971,13 @@ namespace rgbcx
 												
 				if (trial_err2 < trial_err)
 				{
+					trial_err = trial_err2;
 					lr = lr2; lg = lg2; lb = lb2;
 					hr = hr2; hg = hg2; hb = hb2;
 					memcpy(trial_sels, trial_sels2, sizeof(trial_sels));
 				}
+				else
+					break;
 			}
 		}
 
