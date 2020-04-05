@@ -1,4 +1,4 @@
-// rgbcx.h v1.03
+// rgbcx.h v1.04
 // High-performance scalar BC1-5 encoders. Public Domain or MIT license (you choose - see below), written by Richard Geldreich 2020 <richgel99@gmail.com>.
 // Influential references:
 // http://sjbrown.co.uk/2006/01/19/dxt-compression-techniques/
@@ -52,7 +52,10 @@ namespace rgbcx
 
 		// If cEncodeBC1Use3ColorBlocks is set, the encoder can use 3-color mode for a small gain in quality, but lower perf.
 		// Don't set when encoding to BC3.
-		cEncodeBC1Use3ColorBlocks = 16
+		cEncodeBC1Use3ColorBlocks = 16,
+
+		// cEncodeBC1Iterative will greatly increase encode time, but is slightly higher quality.
+		cEncodeBC1Iterative = 32
 	};
 
 	// Level 0 is similar to stb_dxt default quality.
@@ -1746,6 +1749,46 @@ namespace rgbcx
 		return total_err;
 	}
 
+	static inline uint32_t bc1_find_sels4_err(const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16], uint32_t cur_err = UINT32_MAX)
+	{
+		uint32_t block_r[4], block_g[4], block_b[4];
+
+		block_r[0] = (lr << 3) | (lr >> 2); block_g[0] = (lg << 2) | (lg >> 4);	block_b[0] = (lb << 3) | (lb >> 2);
+		block_r[3] = (hr << 3) | (hr >> 2);	block_g[3] = (hg << 2) | (hg >> 4);	block_b[3] = (hb << 3) | (hb >> 2);
+		block_r[1] = (block_r[0] * 2 + block_r[3]) / 3;	block_g[1] = (block_g[0] * 2 + block_g[3]) / 3;	block_b[1] = (block_b[0] * 2 + block_b[3]) / 3;
+		block_r[2] = (block_r[3] * 2 + block_r[0]) / 3;	block_g[2] = (block_g[3] * 2 + block_g[0]) / 3;	block_b[2] = (block_b[3] * 2 + block_b[0]) / 3;
+
+		uint32_t total_err = 0;
+
+		for (uint32_t i = 0; i < 16; i++)
+		{
+			const int r = pSrc_pixels[i].r;
+			const int g = pSrc_pixels[i].g;
+			const int b = pSrc_pixels[i].b;
+
+			uint32_t best_err = squarei((int)block_r[0] - (int)r) + squarei((int)block_g[0] - (int)g) + squarei((int)block_b[0] - (int)b);
+			uint8_t best_sel = 0;
+			
+			for (uint32_t j = 1; (j < 4) && best_err; j++)
+			{
+				uint32_t err = squarei((int)block_r[j] - (int)r) + squarei((int)block_g[j] - (int)g) + squarei((int)block_b[j] - (int)b);
+				if ( (err < best_err) || ((err == best_err) && (j == 3)) )
+				{
+					best_err = err;
+					best_sel = (uint8_t)j;
+				}
+			}
+			
+			total_err += best_err;
+						
+			if (total_err >= cur_err)
+				break;
+			
+			sels[i] = (uint8_t)best_sel;
+		}
+		return total_err;
+	}
+
 	static inline uint32_t bc1_find_sels3_err(bool use_black, const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16], uint32_t cur_err = UINT32_MAX)
 	{
 		uint32_t block_r[3], block_g[3], block_b[3];
@@ -2030,7 +2073,7 @@ namespace rgbcx
 
 		return false;
 	}
-
+		
 	void encode_bc1(void* pDst, const uint8_t* pPixels, uint32_t flags, uint32_t total_orderings_to_try)
 	{
 		assert(g_initialized);
@@ -2233,101 +2276,110 @@ namespace rgbcx
 		{
 			assert(needs_block_error);
 
-			hist h;
-			for (uint32_t i = 0; i < 16; i++)
-				h.m_hist[sels[i]]++;
+			const uint32_t total_iters = (flags & cEncodeBC1Iterative) ? 2 : 1;
+			for (uint32_t iter_index = 0; iter_index < total_iters; iter_index++)
+			{
+				const uint32_t orig_err = cur_err;
 
-			const uint32_t orig_total_order_index = h.lookup_total_ordering_index();
+				hist h;
+				for (uint32_t i = 0; i < 16; i++)
+					h.m_hist[sels[i]]++;
 
-			int r0, g0, b0, r3, g3, b3;
-			r0 = (lr << 3) | (lr >> 2); g0 = (lg << 2) | (lg >> 4); b0 = (lb << 3) | (lb >> 2);
-			r3 = (hr << 3) | (hr >> 2); g3 = (hg << 2) | (hg >> 4); b3 = (hb << 3) | (hb >> 2);
+				const uint32_t orig_total_order_index = h.lookup_total_ordering_index();
+
+				int r0, g0, b0, r3, g3, b3;
+				r0 = (lr << 3) | (lr >> 2); g0 = (lg << 2) | (lg >> 4); b0 = (lb << 3) | (lb >> 2);
+				r3 = (hr << 3) | (hr >> 2); g3 = (hg << 2) | (hg >> 4); b3 = (hb << 3) | (hb >> 2);
 										
-			int ar = r3 - r0, ag = g3 - g0, ab = b3 - b0;
+				int ar = r3 - r0, ag = g3 - g0, ab = b3 - b0;
 				
-			int dots[16];
-			for (uint32_t i = 0; i < 16; i++)
-			{
-				int r = pSrc_pixels[i].r;
-				int g = pSrc_pixels[i].g;
-				int b = pSrc_pixels[i].b;
-				int d = 0x1000000 + (r * ar + g * ag + b * ab);
-				assert(d >= 0);
-				dots[i] = (d << 4) + i;
-			}
-
-			std::sort(dots, dots + 16);
-
-			uint32_t r_sum[17], g_sum[17], b_sum[17];
-			uint32_t r = 0, g = 0, b = 0;
-			for (uint32_t i = 0; i < 16; i++)
-			{
-				const uint32_t p = dots[i] & 15;
-
-				r_sum[i] = r;
-				g_sum[i] = g;
-				b_sum[i] = b;
-
-				r += pSrc_pixels[p].r;
-				g += pSrc_pixels[p].g;
-				b += pSrc_pixels[p].b;
-			}
-
-			r_sum[16] = total_r;
-			g_sum[16] = total_g;
-			b_sum[16] = total_b;
-
-#if 0
-			// Try them all, for debugging.
-			for (uint32_t s = 0; s < NUM_UNIQUE_TOTAL_ORDERINGS; s++)
-			{
-#else
-			total_orderings_to_try = clampi(total_orderings_to_try, MIN_TOTAL_ORDERINGS, MAX_TOTAL_ORDERINGS);
-			for (uint32_t q = 0; q < total_orderings_to_try; q++)
-			{
-				const uint32_t s = g_best_total_orderings[orig_total_order_index][q];
-#endif
-				int trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb;
-
-				vec3F xl, xh;
-
-				if ((s == TOTAL_ORDER_0_16) || (s == TOTAL_ORDER_1_16) || (s == TOTAL_ORDER_2_16) || (s == TOTAL_ORDER_3_16))
+				int dots[16];
+				for (uint32_t i = 0; i < 16; i++)
 				{
-					trial_lr = g_bc1_match5_equals_1[avg_r].m_hi;
-					trial_lg = g_bc1_match6_equals_1[avg_g].m_hi;
-					trial_lb = g_bc1_match5_equals_1[avg_b].m_hi;
-
-					trial_hr = g_bc1_match5_equals_1[avg_r].m_lo;
-					trial_hg = g_bc1_match6_equals_1[avg_g].m_lo;
-					trial_hb = g_bc1_match5_equals_1[avg_b].m_lo;
+					int r = pSrc_pixels[i].r;
+					int g = pSrc_pixels[i].g;
+					int b = pSrc_pixels[i].b;
+					int d = 0x1000000 + (r * ar + g * ag + b * ab);
+					assert(d >= 0);
+					dots[i] = (d << 4) + i;
 				}
-				else
+
+				std::sort(dots, dots + 16);
+
+				uint32_t r_sum[17], g_sum[17], b_sum[17];
+				uint32_t r = 0, g = 0, b = 0;
+				for (uint32_t i = 0; i < 16; i++)
 				{
-					compute_least_squares_endpoints_rgb(&xl, &xh, total_r, total_g, total_b, 
-						g_selector_factors[s][0], g_selector_factors[s][1], g_selector_factors[s][2], s, r_sum, g_sum, b_sum);
+					const uint32_t p = dots[i] & 15;
+
+					r_sum[i] = r;
+					g_sum[i] = g;
+					b_sum[i] = b;
+
+					r += pSrc_pixels[p].r;
+					g += pSrc_pixels[p].g;
+					b += pSrc_pixels[p].b;
+				}
+
+				r_sum[16] = total_r;
+				g_sum[16] = total_g;
+				b_sum[16] = total_b;
+
+	#if 0
+				// Try them all, for debugging.
+				for (uint32_t s = 0; s < NUM_UNIQUE_TOTAL_ORDERINGS; s++)
+				{
+	#else
+				total_orderings_to_try = clampi(total_orderings_to_try, MIN_TOTAL_ORDERINGS, MAX_TOTAL_ORDERINGS);
+				for (uint32_t q = 0; q < total_orderings_to_try; q++)
+				{
+					const uint32_t s = g_best_total_orderings[orig_total_order_index][q];
+	#endif
+					int trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb;
+
+					vec3F xl, xh;
+
+					if ((s == TOTAL_ORDER_0_16) || (s == TOTAL_ORDER_1_16) || (s == TOTAL_ORDER_2_16) || (s == TOTAL_ORDER_3_16))
+					{
+						trial_lr = g_bc1_match5_equals_1[avg_r].m_hi;
+						trial_lg = g_bc1_match6_equals_1[avg_g].m_hi;
+						trial_lb = g_bc1_match5_equals_1[avg_b].m_hi;
+
+						trial_hr = g_bc1_match5_equals_1[avg_r].m_lo;
+						trial_hg = g_bc1_match6_equals_1[avg_g].m_lo;
+						trial_hb = g_bc1_match5_equals_1[avg_b].m_lo;
+					}
+					else
+					{
+						compute_least_squares_endpoints_rgb(&xl, &xh, total_r, total_g, total_b, 
+							g_selector_factors[s][0], g_selector_factors[s][1], g_selector_factors[s][2], s, r_sum, g_sum, b_sum);
 					
-					precise_round_565(xl, xh, trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb);
-				}
+						precise_round_565(xl, xh, trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb);
+					}
 
-				uint8_t trial_sels[16];
-				uint32_t trial_err = bc1_find_sels_err(pSrc_pixels, trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb, trial_sels, cur_err);
-				if (trial_err < cur_err)
-				{
-					cur_err = trial_err;
+					uint8_t trial_sels[16];
+					uint32_t trial_err = bc1_find_sels_err(pSrc_pixels, trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb, trial_sels, cur_err);
+					if (trial_err < cur_err)
+					{
+						cur_err = trial_err;
 
-					lr = trial_lr;
-					lg = trial_lg;
-					lb = trial_lb;
+						lr = trial_lr;
+						lg = trial_lg;
+						lb = trial_lb;
 
-					hr = trial_hr;
-					hg = trial_hg;
-					hb = trial_hb;
+						hr = trial_hr;
+						hg = trial_hg;
+						hb = trial_hb;
 
-					memcpy(sels, trial_sels, 16);
-				}
+						memcpy(sels, trial_sels, 16);
+					}
 
-			} // s
+				} // s
 
+				if ((!cur_err) || (cur_err == orig_err))
+					break;
+			
+			} // iter_index
 		}
 
 		if (cur_err) 

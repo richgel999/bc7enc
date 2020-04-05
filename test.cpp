@@ -47,6 +47,7 @@ static int print_usage()
 	fprintf(stderr, "-b BC1: Enable 3-color mode for blocks containing black or very dark pixels. (Important: engine/shader MUST ignore decoded texture alpha if this flag is enabled!)\n");
 	fprintf(stderr, "-c BC1: Disable 3-color mode for solid color blocks\n");
 	fprintf(stderr, "-n BC1: Enable balancing decoding error between ideal and NVidia hardware BC1 decoding (textures still usable on parts from other vendors)\n");
+	fprintf(stderr, "-i BC1: Enable iterative mode (much slower, but slightly higher quality)\n");
 		
 	return EXIT_FAILURE;
 }
@@ -441,6 +442,7 @@ int main(int argc, char *argv[])
 	
 	bool balance_nv_error = false;
 	bool use_bc1_3color_mode = true;
+	bool use_bc1_iterative_mode = false;
 	bool use_bc1_3color_mode_for_black = false;
 
 	DXGI_FORMAT dxgi_format = DXGI_FORMAT_BC7_UNORM;
@@ -560,6 +562,11 @@ int main(int argc, char *argv[])
 				case 'c':
 				{
 					use_bc1_3color_mode = false;
+					break;
+				}
+				case 'i':
+				{
+					use_bc1_iterative_mode = true;
 					break;
 				}
 				default:
@@ -694,13 +701,19 @@ int main(int argc, char *argv[])
 		rgbcx_flags |= rgbcx::cEncodeBC1Use3ColorBlocksForBlackPixels;
 	if (use_bc1_3color_mode)
 		rgbcx_flags |= rgbcx::cEncodeBC1Use3ColorBlocks;
+	if (use_bc1_iterative_mode)
+		rgbcx_flags |= rgbcx::cEncodeBC1Iterative;
 	
 	if (dxgi_format == DXGI_FORMAT_BC7_UNORM)
+	{
 		printf("Max mode 1 partitions: %u, uber level: %u, perceptual: %u\n", pack_params.m_max_partitions_mode, pack_params.m_uber_level, perceptual);
+	}
 	else
-		printf("Uber level: %u, flags: 0x%X, total orderings to try: %u, using 3-color mode for black: %u, use 3-color mode: %u, balance NV error: %u\n", 
+	{
+		printf("Uber level: %u, flags: 0x%X, total orderings to try: %u, using 3-color mode for black: %u, use 3-color mode: %u, balance NV error: %u, iterative: %u\n", 
 			uber_level, rgbcx_flags, rgbcx_total_orderings_to_try, use_bc1_3color_mode_for_black,
-			use_bc1_3color_mode, balance_nv_error);
+			use_bc1_3color_mode, balance_nv_error, use_bc1_iterative_mode);
+	}
 
 	bc7enc_compress_block_init();
 	rgbcx::encode_bc1_init(balance_nv_error);
