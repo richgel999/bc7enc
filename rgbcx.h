@@ -2385,11 +2385,11 @@ namespace rgbcx
 
 		if (cur_err) 
 		{
-			assert(needs_block_error);
-
 			if ( ((flags & cEncodeBC1Use3ColorBlocks) != 0) ||
 				  ((any_black_pixels) && ((flags & cEncodeBC1Use3ColorBlocksForBlackPixels) != 0)) )
 			{
+				assert(needs_block_error);
+
 				if (try_3color_block(pDst, pSrc_pixels, flags, cur_err))
 					return;
 			}
