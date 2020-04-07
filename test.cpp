@@ -48,6 +48,7 @@ static int print_usage()
 	fprintf(stderr, "-c BC1: Disable 3-color mode for solid color blocks\n");
 	fprintf(stderr, "-n BC1: Enable balancing decoding error between ideal and NVidia hardware BC1 decoding (textures still usable on parts from other vendors)\n");
 	fprintf(stderr, "-i BC1: Enable iterative mode (much slower, but slightly higher quality)\n");
+	fprintf(stderr, "-q BC1: Use approximate PCA algorithm (around 15%% faster at -u0, slightly higher average quality on most but not all textures)\n");
 		
 	return EXIT_FAILURE;
 }
@@ -444,6 +445,7 @@ int main(int argc, char *argv[])
 	bool use_bc1_3color_mode = true;
 	bool use_bc1_iterative_mode = false;
 	bool use_bc1_3color_mode_for_black = false;
+	bool use_bc1_approx_pca = false;
 
 	DXGI_FORMAT dxgi_format = DXGI_FORMAT_BC7_UNORM;
 	uint32_t pixel_format_bpp = 8;
@@ -567,6 +569,11 @@ int main(int argc, char *argv[])
 				case 'i':
 				{
 					use_bc1_iterative_mode = true;
+					break;
+				}
+				case 'q':
+				{
+					use_bc1_approx_pca = true;
 					break;
 				}
 				default:
@@ -704,6 +711,8 @@ int main(int argc, char *argv[])
 		rgbcx_flags |= rgbcx::cEncodeBC1Use3ColorBlocks;
 	if (use_bc1_iterative_mode)
 		rgbcx_flags |= rgbcx::cEncodeBC1Iterative;
+	if (use_bc1_approx_pca)
+		rgbcx_flags |= rgbcx::cEncodeBC1ApproxPCA;
 	
 	if (dxgi_format == DXGI_FORMAT_BC7_UNORM)
 	{
@@ -711,9 +720,9 @@ int main(int argc, char *argv[])
 	}
 	else
 	{
-		printf("Uber level: %u, flags: 0x%X, 4-color total orderings to try: %u, 3-color total orderings to try: %u, using 3-color mode for black: %u, use 3-color mode: %u, balance NV error: %u, iterative: %u\n", 
+		printf("Uber level: %u, flags: 0x%X, 4-color total orderings to try: %u, 3-color total orderings to try: %u, using 3-color mode for black: %u, use 3-color mode: %u, balance NV error: %u, iterative: %u, approx PCA: %u\n", 
 			uber_level, rgbcx_flags, rgbcx_total_orderings_to_try, rgbcx_total_orderings_to_try3, use_bc1_3color_mode_for_black,
-			use_bc1_3color_mode, balance_nv_error, use_bc1_iterative_mode);
+			use_bc1_3color_mode, balance_nv_error, use_bc1_iterative_mode, use_bc1_approx_pca);
 	}
 
 	bc7enc_compress_block_init();

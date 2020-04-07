@@ -1,9 +1,10 @@
-// rgbcx.h v1.05
+// rgbcx.h v1.06
 // High-performance scalar BC1-5 encoders. Public Domain or MIT license (you choose - see below), written by Richard Geldreich 2020 <richgel99@gmail.com>.
 // Influential references:
 // http://sjbrown.co.uk/2006/01/19/dxt-compression-techniques/
 // https://github.com/nothings/stb/blob/master/stb_dxt.h
 // https://gist.github.com/castano/c92c7626f288f9e99e158520b14a61cf
+// https://github.com/castano/icbc/blob/master/icbc.h
 //
 // This is a single header file library. Be sure to "#define RGBCX_IMPLEMENTATION" in one .cpp file somewhere.
 //
@@ -59,7 +60,11 @@ namespace rgbcx
 
 		// cEncodeBC1Iterative will greatly increase encode time, but is very slightly higher quality.
 		// Same as squish's iterative cluster fit option. Not really worth the tiny boost in quality, unless you just don't care about perf. at all.
-		cEncodeBC1Iterative = 32
+		cEncodeBC1Iterative = 32,
+
+		// cEncodeBC1ApproxPCA enables a fast all-integer PCA approximation on 4-color blocks. 
+		// At level 0 options (no other flags), this is ~15% faster, and higher *average* quality.
+		cEncodeBC1ApproxPCA = 64
 	};
 
 	// Level 0 is similar to stb_dxt default quality.
@@ -2632,6 +2637,62 @@ namespace rgbcx
 				hr = hb = to_5(max_r);
 				hg = to_6(max_r);
 			}
+		}
+		else if (flags & cEncodeBC1ApproxPCA)
+		{
+			// Algorithm from icbc.h compress_dxt1_fast(), but converted to integer.
+			int inset_r = (min_r - max_r - 8) >> 4;
+			int inset_g = (min_g - max_g - 8) >> 4;
+			int inset_b = (min_b - max_b - 8) >> 4;
+
+			min_r -= inset_r;
+			min_g -= inset_g;
+			min_b -= inset_b;
+			if ((uint32_t)(min_r | min_g | min_b) > 255U)
+			{
+				min_r = clampi(min_r, 0, 255);
+				min_g = clampi(min_g, 0, 255);
+				min_b = clampi(min_b, 0, 255);
+			}
+
+			max_r += inset_r;
+			max_g += inset_g;
+			max_b += inset_b;
+			if ((uint32_t)(max_r | max_g | max_b) > 255U)
+			{
+				max_r = clampi(max_r, 0, 255);
+				max_g = clampi(max_g, 0, 255);
+				max_b = clampi(max_b, 0, 255);
+			}
+
+			int icov_xz = 0, icov_yz = 0;
+			for (uint32_t i = 0; i < 16; i++)
+			{
+				int r = (int)pSrc_pixels[i].r - avg_r;
+				int g = (int)pSrc_pixels[i].g - avg_g;
+				int b = (int)pSrc_pixels[i].b - avg_b;
+				icov_xz += r * b;
+				icov_yz += g * b;
+			}
+
+			 int x0 = min_r;
+			 int y0 = min_g;
+			 int x1 = max_r;
+			 int y1 = max_g;
+
+			 if (icov_xz < 0)
+				  std::swap(x0, x1);
+
+			 if (icov_yz < 0)
+				  std::swap(y0, y1);
+			 
+			 lr = to_5(x0);
+			 lg = to_6(y0);
+			 lb = to_5(min_b);
+
+			 hr = to_5(x1);
+			 hg = to_6(y1);
+			 hb = to_5(max_b);
 		}
 		else
 		{
