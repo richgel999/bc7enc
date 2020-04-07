@@ -64,9 +64,12 @@ namespace rgbcx
 
 		// cEncodeBC1ApproxPCA enables a fast all-integer PCA approximation on 4-color blocks. 
 		// At level 0 options (no other flags), this is ~15% faster, and higher *average* quality.
-		cEncodeBC1ApproxPCA = 64
+		cEncodeBC1ApproxPCA = 64,
+
+		cEncodeBC1UseFasterMSEEval = 128
 	};
 
+	// Note: These are the old/original level options. You can still use them, but the encode_bc1() function now has an overload that accepts a [0,10] quality level.
 	// Level 0 is similar to stb_dxt default quality.
 	const uint32_t LEVEL0_OPTIONS = 0;
 	
@@ -92,11 +95,15 @@ namespace rgbcx
 	// Always returns a 4 color block, unless cEncodeBC1Use3ColorBlocksForBlackPixels or cEncodeBC1Use3ColorBlock flags are specified. 
 	// total_orderings_to_try controls the perf. vs. quality tradeoff on 4-color blocks when the cEncodeBC1UseLikelyTotalOrderings flag is used. It must range between [MIN_TOTAL_ORDERINGS, MAX_TOTAL_ORDERINGS].
 	// total_orderings_to_try3 controls the perf. vs. quality tradeoff on 3-color bocks when the cEncodeBC1UseLikelyTotalOrderings and the cEncodeBC1Use3ColorBlocks flags are used. Valid range is [0,MAX_TOTAL_ORDERINGS] (0=disabled).
-	void encode_bc1(void* pDst, const uint8_t* pPixels, uint32_t flags = DEFAULT_OPTIONS, uint32_t total_orderings_to_try = DEFAULT_TOTAL_ORDERINGS_TO_TRY, uint32_t total_orderings_to_try3 = DEFAULT_TOTAL_ORDERINGS_TO_TRY3);
+	void encode_bc1(void* pDst, const uint8_t* pPixels, uint32_t flags = 0, uint32_t total_orderings_to_try = DEFAULT_TOTAL_ORDERINGS_TO_TRY, uint32_t total_orderings_to_try3 = DEFAULT_TOTAL_ORDERINGS_TO_TRY3);
 
+	// Alternate simplified interface, which accepts a level parameter and converts that to the best overall flags.
+	const uint32_t MIN_LEVEL = 0, MAX_LEVEL = 10;
+	void encode_bc1(uint32_t level, void* pDst, const uint8_t* pPixels, bool allow_3color, bool use_transparent_texels_for_black);
+	
 	void encode_bc4(void* pDst, const uint8_t* pPixels, uint32_t stride = 4);
 
-	void encode_bc3(void* pDst, const uint8_t* pPixels, uint32_t flags = DEFAULT_OPTIONS, uint32_t total_orderings_to_try = DEFAULT_TOTAL_ORDERINGS_TO_TRY);
+	void encode_bc3(void* pDst, const uint8_t* pPixels, uint32_t flags = 0, uint32_t total_orderings_to_try = DEFAULT_TOTAL_ORDERINGS_TO_TRY);
 
 	void encode_bc5(void* pDst, const uint8_t* pPixels, uint32_t chan0 = 0, uint32_t chan1 = 1, uint32_t stride = 4);
 
@@ -1973,7 +1980,7 @@ namespace rgbcx
 		return true;
 	}
 
-	static inline void bc1_find_sels(const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16])
+	static inline void bc1_find_sels4(const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16])
 	{
 		uint32_t block_r[4], block_g[4], block_b[4];
 
@@ -2007,8 +2014,60 @@ namespace rgbcx
 			sels[i+3] = s_sels[(d3 <= t0) + (d3 < t1) + (d3 < t2)];
 		}
 	}
+
+	static inline uint32_t bc1_find_sels4_fasterr(const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16], uint32_t cur_err = UINT32_MAX)
+	{
+		uint32_t block_r[4], block_g[4], block_b[4];
+
+		block_r[0] = (lr << 3) | (lr >> 2); block_g[0] = (lg << 2) | (lg >> 4);	block_b[0] = (lb << 3) | (lb >> 2);
+		block_r[3] = (hr << 3) | (hr >> 2);	block_g[3] = (hg << 2) | (hg >> 4);	block_b[3] = (hb << 3) | (hb >> 2);
+		block_r[1] = (block_r[0] * 2 + block_r[3]) / 3;	block_g[1] = (block_g[0] * 2 + block_g[3]) / 3;	block_b[1] = (block_b[0] * 2 + block_b[3]) / 3;
+		block_r[2] = (block_r[3] * 2 + block_r[0]) / 3;	block_g[2] = (block_g[3] * 2 + block_g[0]) / 3;	block_b[2] = (block_b[3] * 2 + block_b[0]) / 3;
+
+		int ar = block_r[3] - block_r[0], ag = block_g[3] - block_g[0], ab = block_b[3] - block_b[0];
+
+		int dots[4];
+		for (uint32_t i = 0; i < 4; i++)
+			dots[i] = (int)block_r[i] * ar + (int)block_g[i] * ag + (int)block_b[i] * ab;
+
+		int t0 = dots[0] + dots[1], t1 = dots[1] + dots[2], t2 = dots[2] + dots[3];
+
+		ar *= 2; ag *= 2; ab *= 2;
+
+		static const uint8_t s_sels[4] = { 3, 2, 1, 0 };
+
+		uint32_t total_err = 0;
+
+		for (uint32_t i = 0; i < 16; i += 4)
+		{
+			const int d0 = pSrc_pixels[i+0].r * ar + pSrc_pixels[i+0].g * ag + pSrc_pixels[i+0].b * ab;
+			const int d1 = pSrc_pixels[i+1].r * ar + pSrc_pixels[i+1].g * ag + pSrc_pixels[i+1].b * ab;
+			const int d2 = pSrc_pixels[i+2].r * ar + pSrc_pixels[i+2].g * ag + pSrc_pixels[i+2].b * ab;
+			const int d3 = pSrc_pixels[i+3].r * ar + pSrc_pixels[i+3].g * ag + pSrc_pixels[i+3].b * ab;
+
+			uint8_t sel0 = s_sels[(d0 <= t0) + (d0 < t1) + (d0 < t2)];
+			uint8_t sel1 = s_sels[(d1 <= t0) + (d1 < t1) + (d1 < t2)];
+			uint8_t sel2 = s_sels[(d2 <= t0) + (d2 < t1) + (d2 < t2)];
+			uint8_t sel3 = s_sels[(d3 <= t0) + (d3 < t1) + (d3 < t2)];
+
+			sels[i+0] = sel0;
+			sels[i+1] = sel1;
+			sels[i+2] = sel2;
+			sels[i+3] = sel3;
+
+			total_err += squarei(pSrc_pixels[i+0].r - block_r[sel0]) + squarei(pSrc_pixels[i+0].g - block_g[sel0]) + squarei(pSrc_pixels[i+0].b - block_b[sel0]);
+			total_err += squarei(pSrc_pixels[i+1].r - block_r[sel1]) + squarei(pSrc_pixels[i+1].g - block_g[sel1]) + squarei(pSrc_pixels[i+1].b - block_b[sel1]);
+			total_err += squarei(pSrc_pixels[i+2].r - block_r[sel2]) + squarei(pSrc_pixels[i+2].g - block_g[sel2]) + squarei(pSrc_pixels[i+2].b - block_b[sel2]);
+			total_err += squarei(pSrc_pixels[i+3].r - block_r[sel3]) + squarei(pSrc_pixels[i+3].g - block_g[sel3]) + squarei(pSrc_pixels[i+3].b - block_b[sel3]);
+
+			if (total_err >= cur_err)
+				break;
+		}
+
+		return total_err;
+	}
 	
-	static inline uint32_t bc1_find_sels_err(const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16], uint32_t cur_err = UINT32_MAX)
+	static inline uint32_t bc1_find_sels4_err(const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16], uint32_t cur_err = UINT32_MAX)
 	{
 		uint32_t block_r[4], block_g[4], block_b[4];
 
@@ -2059,7 +2118,7 @@ namespace rgbcx
 		return total_err;
 	}
 
-	static inline uint32_t bc1_find_sels4_err(const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16], uint32_t cur_err = UINT32_MAX)
+	static inline uint32_t bc1_find_sels4_fullerr(const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16], uint32_t cur_err = UINT32_MAX)
 	{
 		uint32_t block_r[4], block_g[4], block_b[4];
 
@@ -2099,7 +2158,7 @@ namespace rgbcx
 		return total_err;
 	}
 
-	static inline uint32_t bc1_find_sels3_err(bool use_black, const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16], uint32_t cur_err = UINT32_MAX)
+	static inline uint32_t bc1_find_sels3_fullerr(bool use_black, const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16], uint32_t cur_err = UINT32_MAX)
 	{
 		uint32_t block_r[3], block_g[3], block_b[3];
 
@@ -2294,7 +2353,7 @@ namespace rgbcx
 		int hb = to_5(pSrc_pixels[high_c].b);
 
 		uint8_t trial_sels[16];
-		uint32_t trial_err = bc1_find_sels3_err(true, pSrc_pixels, lr, lg, lb, hr, hg, hb, trial_sels, UINT32_MAX);
+		uint32_t trial_err = bc1_find_sels3_fullerr(true, pSrc_pixels, lr, lg, lb, hr, hg, hb, trial_sels, UINT32_MAX);
 
 		if (trial_err)
 		{
@@ -2322,7 +2381,7 @@ namespace rgbcx
 					break;
 								
 				uint8_t trial_sels2[16];
-				uint32_t trial_err2 = bc1_find_sels3_err(true, pSrc_pixels, lr2, lg2, lb2, hr2, hg2, hb2, trial_sels2, trial_err);
+				uint32_t trial_err2 = bc1_find_sels3_fullerr(true, pSrc_pixels, lr2, lg2, lb2, hr2, hg2, hb2, trial_sels2, trial_err);
 												
 				if (trial_err2 < trial_err)
 				{
@@ -2386,7 +2445,7 @@ namespace rgbcx
 		int avg_r, int avg_g, int avg_b, int lr, int lg, int lb, int hr, int hg, int hb, int total_r, int total_g, int total_b, uint32_t total_orderings_to_try)
 	{
 		uint8_t trial_sels[16];
-		uint32_t trial_err = bc1_find_sels3_err(false, pSrc_pixels, lr, lg, lb, hr, hg, hb, trial_sels, UINT32_MAX);
+		uint32_t trial_err = bc1_find_sels3_fullerr(false, pSrc_pixels, lr, lg, lb, hr, hg, hb, trial_sels, UINT32_MAX);
 
 		if (trial_err)
 		{
@@ -2414,7 +2473,7 @@ namespace rgbcx
 					break;
 				
 				uint8_t trial_sels2[16];
-				uint32_t trial_err2 = bc1_find_sels3_err(false, pSrc_pixels, lr2, lg2, lb2, hr2, hg2, hb2, trial_sels2, trial_err);
+				uint32_t trial_err2 = bc1_find_sels3_fullerr(false, pSrc_pixels, lr2, lg2, lb2, hr2, hg2, hb2, trial_sels2, trial_err);
 												
 				if (trial_err2 < trial_err)
 				{
@@ -2507,7 +2566,7 @@ namespace rgbcx
 				}
 
 				uint8_t trial_sels2[16];
-				uint32_t trial_err2 = bc1_find_sels3_err(false, pSrc_pixels, trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb, trial_sels2, trial_err);
+				uint32_t trial_err2 = bc1_find_sels3_fullerr(false, pSrc_pixels, trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb, trial_sels2, trial_err);
 				
 				if (trial_err2 < trial_err)
 				{
@@ -2577,6 +2636,66 @@ namespace rgbcx
 		}
 
 		return false;
+	}
+
+	void encode_bc1(uint32_t level, void* pDst, const uint8_t* pPixels, bool allow_3color, bool allow_transparent_texels_for_black)
+	{
+		uint32_t flags = 0, total_orderings4 = 1, total_orderings3 = 1;
+
+		switch (level)
+		{
+		case 0:
+			flags = cEncodeBC1ApproxPCA;
+			break;
+		case 1:
+			break;
+		case 2:
+			flags = cEncodeBC1ApproxPCA | cEncodeBC1HighQuality;
+			break;
+		case 3:
+			flags = cEncodeBC1HighQuality | cEncodeBC1UseFasterMSEEval | cEncodeBC1UseLikelyTotalOrderings;
+			break;
+		case 4:
+			flags = cEncodeBC1HighQuality | cEncodeBC1UseFasterMSEEval | cEncodeBC1UseLikelyTotalOrderings;
+			total_orderings4 = 2;
+			break;
+		case 5:
+			flags = cEncodeBC1HighQuality | cEncodeBC1UseFasterMSEEval | cEncodeBC1UseLikelyTotalOrderings;
+			total_orderings4 = 4;
+			break;
+		case 6:
+			flags = cEncodeBC1HighQuality | cEncodeBC1UseFasterMSEEval | cEncodeBC1UseLikelyTotalOrderings;
+			flags |= (allow_3color ? cEncodeBC1Use3ColorBlocks : 0) | (allow_transparent_texels_for_black ? cEncodeBC1Use3ColorBlocksForBlackPixels : 0);
+			total_orderings4 = 8;
+			total_orderings3 = 1;
+			break;
+		case 7:
+			flags = cEncodeBC1HighQuality | cEncodeBC1UseFasterMSEEval | cEncodeBC1UseLikelyTotalOrderings;
+			flags |= (allow_3color ? cEncodeBC1Use3ColorBlocks : 0) | (allow_transparent_texels_for_black ? cEncodeBC1Use3ColorBlocksForBlackPixels : 0);
+			total_orderings4 = 16;
+			total_orderings3 = 4;
+			break;
+		case 8:
+			flags = cEncodeBC1HighQuality | cEncodeBC1UseFasterMSEEval | cEncodeBC1UseLikelyTotalOrderings;
+			flags |= (allow_3color ? cEncodeBC1Use3ColorBlocks : 0) | (allow_transparent_texels_for_black ? cEncodeBC1Use3ColorBlocksForBlackPixels : 0);
+			total_orderings4 = 20;
+			total_orderings3 = 8;
+			break;
+		case 9:
+			flags = cEncodeBC1HighQuality | cEncodeBC1UseLikelyTotalOrderings;
+			flags |= (allow_3color ? cEncodeBC1Use3ColorBlocks : 0) | (allow_transparent_texels_for_black ? cEncodeBC1Use3ColorBlocksForBlackPixels : 0);
+			total_orderings4 = 24;
+			total_orderings3 = 12;
+			break;
+		case 10:
+			flags = cEncodeBC1HighQuality | cEncodeBC1UseLikelyTotalOrderings;
+			flags |= (allow_3color ? cEncodeBC1Use3ColorBlocks : 0) | (allow_transparent_texels_for_black ? cEncodeBC1Use3ColorBlocksForBlackPixels : 0);
+			total_orderings4 = 32;
+			total_orderings3 = 32;
+			break;
+		}
+
+		encode_bc1(pDst, pPixels, flags, total_orderings4, total_orderings3);
 	}
 		
 	void encode_bc1(void* pDst, const uint8_t* pPixels, uint32_t flags, uint32_t total_orderings_to_try, uint32_t total_orderings_to_try3)
@@ -2770,9 +2889,14 @@ namespace rgbcx
 			(any_black_pixels && ((flags & cEncodeBC1Use3ColorBlocksForBlackPixels) != 0));
 		
 		if (needs_block_error)
-			cur_err = bc1_find_sels_err(pSrc_pixels, lr, lg, lb, hr, hg, hb, sels);
+		{
+			if (flags & cEncodeBC1UseFasterMSEEval)
+				cur_err = bc1_find_sels4_fasterr(pSrc_pixels, lr, lg, lb, hr, hg, hb, sels);
+			else
+				cur_err = bc1_find_sels4_err(pSrc_pixels, lr, lg, lb, hr, hg, hb, sels);
+		}
 		else
-			bc1_find_sels(pSrc_pixels, lr, lg, lb, hr, hg, hb, sels);
+			bc1_find_sels4(pSrc_pixels, lr, lg, lb, hr, hg, hb, sels);
 						
 		const uint32_t total_ls_passes = flags & cEncodeBC1HighQuality ? 2 : 1;
 		for (uint32_t ls_pass = 0; ls_pass < total_ls_passes; ls_pass++)
@@ -2804,7 +2928,13 @@ namespace rgbcx
 			if (needs_block_error)
 			{
 				uint8_t trial_sels[16];
-				uint32_t trial_err = bc1_find_sels_err(pSrc_pixels, trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb, trial_sels, cur_err);
+				
+				uint32_t trial_err;
+				if (flags & cEncodeBC1UseFasterMSEEval)
+					trial_err = bc1_find_sels4_fasterr(pSrc_pixels, trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb, trial_sels, cur_err);
+				else
+					trial_err = bc1_find_sels4_err(pSrc_pixels, trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb, trial_sels, cur_err);
+				
 				if (trial_err < cur_err)
 				{
 					lr = trial_lr;
@@ -2823,7 +2953,7 @@ namespace rgbcx
 			}
 			else
 			{
-				bc1_find_sels(pSrc_pixels, trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb, sels);
+				bc1_find_sels4(pSrc_pixels, trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb, sels);
 
 				lr = trial_lr;
 				lg = trial_lg;
@@ -2921,7 +3051,13 @@ namespace rgbcx
 					}
 
 					uint8_t trial_sels[16];
-					uint32_t trial_err = bc1_find_sels_err(pSrc_pixels, trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb, trial_sels, cur_err);
+					
+					uint32_t trial_err;
+					if (flags & cEncodeBC1UseFasterMSEEval)
+						trial_err = bc1_find_sels4_fasterr(pSrc_pixels, trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb, trial_sels, cur_err);
+					else
+						trial_err = bc1_find_sels4_err(pSrc_pixels, trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb, trial_sels, cur_err);
+					
 					if (trial_err < cur_err)
 					{
 						cur_err = trial_err;
