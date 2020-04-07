@@ -83,9 +83,10 @@ namespace rgbcx
 		
 	// Encodes a block of 4x4 pixels to BC1 format. 
 	// No transparency supported.
-	// Always returns a 4 color block, unless cEncodeBC1Use3ColorBlocksForBlackPixels or cEncodeBC1Use3ColorBlock flags are specified. 
-	// total_orderings_to_try controls the perf. vs. quality tradeoff when the cEncodeBC1UseLikelyTotalOrderings flag is used.
 	// The pixels are in RGBA format, where R is first in memory. The BC1 encoder completely ignores the alpha channel (i.e. there is no punchthrough alpha support).
+	// Always returns a 4 color block, unless cEncodeBC1Use3ColorBlocksForBlackPixels or cEncodeBC1Use3ColorBlock flags are specified. 
+	// total_orderings_to_try controls the perf. vs. quality tradeoff on 4-color blocks when the cEncodeBC1UseLikelyTotalOrderings flag is used. It must range between [MIN_TOTAL_ORDERINGS, MAX_TOTAL_ORDERINGS].
+	// total_orderings_to_try3 controls the perf. vs. quality tradeoff on 3-color bocks when the cEncodeBC1UseLikelyTotalOrderings and the cEncodeBC1Use3ColorBlocks flags are used. Valid range is [0,MAX_TOTAL_ORDERINGS] (0=disabled).
 	void encode_bc1(void* pDst, const uint8_t* pPixels, uint32_t flags = DEFAULT_OPTIONS, uint32_t total_orderings_to_try = DEFAULT_TOTAL_ORDERINGS_TO_TRY, uint32_t total_orderings_to_try3 = DEFAULT_TOTAL_ORDERINGS_TO_TRY3);
 
 	void encode_bc4(void* pDst, const uint8_t* pPixels, uint32_t stride = 4);
@@ -2422,7 +2423,7 @@ namespace rgbcx
 			}
 		}
 
-		if ((trial_err) && (flags & cEncodeBC1UseLikelyTotalOrderings))
+		if ((trial_err) && (flags & cEncodeBC1UseLikelyTotalOrderings) && (total_orderings_to_try))
 		{
 			hist3 h;
 			for (uint32_t i = 0; i < 16; i++)
@@ -2473,7 +2474,7 @@ namespace rgbcx
 			for (uint32_t s = 0; s < NUM_UNIQUE_TOTAL_ORDERINGS3; s++)
 			{
 #else
-			total_orderings_to_try = clampi(total_orderings_to_try, MIN_TOTAL_ORDERINGS, MAX_TOTAL_ORDERINGS);
+			total_orderings_to_try = std::min(total_orderings_to_try, MAX_TOTAL_ORDERINGS);
 			for (uint32_t q = 0; q < total_orderings_to_try; q++)
 			{
 				const uint32_t s = g_best_total_orderings3[orig_total_order_index][q];
