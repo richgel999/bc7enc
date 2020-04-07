@@ -1,4 +1,4 @@
-// rgbcx.h v1.04
+// rgbcx.h v1.05
 // High-performance scalar BC1-5 encoders. Public Domain or MIT license (you choose - see below), written by Richard Geldreich 2020 <richgel99@gmail.com>.
 // Influential references:
 // http://sjbrown.co.uk/2006/01/19/dxt-compression-techniques/
@@ -36,7 +36,9 @@ namespace rgbcx
 
 	enum
 	{
-		// Try to improve quality using the most likely total orderings. The total_orderings_to_try parameter will then control the number of total orderings to try.
+		// Try to improve quality using the most likely total orderings. 
+		// The total_orderings_to_try parameter will then control the number of total orderings to try for 4 color blocks, and the 
+		// total_orderings_to_try3 parameter will control the number of total orderings to try for 3 color blocks (if they are enabled).
 		cEncodeBC1UseLikelyTotalOrderings = 2,
 		
 		// Use 2 least squares pass, instead of one (same as stb_dxt's HIGHQUAL option).
@@ -51,11 +53,12 @@ namespace rgbcx
 		cEncodeBC1Use3ColorBlocksForBlackPixels = 8,
 
 		// If cEncodeBC1Use3ColorBlocks is set, the encoder can use 3-color mode for a small but noticeable gain in quality, but lower perf.
+		// If you also specify the cEncodeBC1UseLikelyTotalOrderings flag, set the total_orderings_to_try3 paramter to the number of total orderings to try.
 		// Don't set when encoding to BC3.
 		cEncodeBC1Use3ColorBlocks = 16,
 
-		// cEncodeBC1Iterative will greatly increase encode time, but is slightly higher quality.
-		// Same as squish's iterative cluster fit option.
+		// cEncodeBC1Iterative will greatly increase encode time, but is very slightly higher quality.
+		// Same as squish's iterative cluster fit option. Not really worth the tiny boost in quality, unless you just don't care about perf. at all.
 		cEncodeBC1Iterative = 32
 	};
 
@@ -75,13 +78,15 @@ namespace rgbcx
 	
 	// DEFAULT_TOTAL_ORDERINGS_TO_TRY is around 3x faster than libsquish at slightly higher average quality. 10-16 is a good range to start to compete against libsquish.
 	const uint32_t DEFAULT_TOTAL_ORDERINGS_TO_TRY = 10;
+
+	const uint32_t DEFAULT_TOTAL_ORDERINGS_TO_TRY3 = 1;
 		
 	// Encodes a block of 4x4 pixels to BC1 format. 
 	// No transparency supported.
 	// Always returns a 4 color block, unless cEncodeBC1Use3ColorBlocksForBlackPixels or cEncodeBC1Use3ColorBlock flags are specified. 
 	// total_orderings_to_try controls the perf. vs. quality tradeoff when the cEncodeBC1UseLikelyTotalOrderings flag is used.
 	// The pixels are in RGBA format, where R is first in memory. The BC1 encoder completely ignores the alpha channel (i.e. there is no punchthrough alpha support).
-	void encode_bc1(void* pDst, const uint8_t* pPixels, uint32_t flags = DEFAULT_OPTIONS, uint32_t total_orderings_to_try = DEFAULT_TOTAL_ORDERINGS_TO_TRY);
+	void encode_bc1(void* pDst, const uint8_t* pPixels, uint32_t flags = DEFAULT_OPTIONS, uint32_t total_orderings_to_try = DEFAULT_TOTAL_ORDERINGS_TO_TRY, uint32_t total_orderings_to_try3 = DEFAULT_TOTAL_ORDERINGS_TO_TRY3);
 
 	void encode_bc4(void* pDst, const uint8_t* pPixels, uint32_t stride = 4);
 
@@ -100,10 +105,11 @@ namespace rgbcx
 #ifdef RGBCX_IMPLEMENTATION
 namespace rgbcx
 {
-	const uint32_t NUM_UNIQUE_TOTAL_ORDERINGS = 969;
+	const uint32_t NUM_UNIQUE_TOTAL_ORDERINGS4 = 969;
 
 	// All total orderings for 16 pixels 2-bit selectors.
-	static uint8_t g_unique_total_orders[NUM_UNIQUE_TOTAL_ORDERINGS][4] = 
+	// BC1 selector order 0, 2, 3, 1 (i.e. the selectors are reordered into linear order).
+	static uint8_t g_unique_total_orders4[NUM_UNIQUE_TOTAL_ORDERINGS4][4] = 
 	{
 		{0,8,2,6},{4,3,9,0},{4,8,1,3},{12,0,3,1},{11,3,2,0},{6,4,6,0},{7,5,0,4},{6,0,8,2},{1,0,0,15},{3,0,8,5},{1,1,13,1},{13,1,2,0},{0,14,1,1},{0,15,1,0},{0,13,0,3},{16,0,0,0},{4,3,4,5},{8,6,0,2},{0,10,0,6},{10,0,4,2},{7,2,1,6},{4,7,5,0},{1,4,7,4},{0,14,2,0},{2,7,2,5},{9,0,5,2},{9,2,2,3},{10,0,5,1},{2,3,7,4},{4,9,0,3},{1,5,0,10},{1,1,6,8},
 		{6,6,4,0},{11,5,0,0},{11,2,0,3},{4,0,10,2},{2,3,10,1},{1,13,1,1},{0,14,0,2},{2,3,3,8},{12,3,1,0},{14,0,0,2},{9,1,3,3},{6,4,0,6},{1,1,5,9},{5,9,0,2},{2,10,1,3},{12,0,0,4},{4,6,6,0},{0,6,4,6},{3,7,4,2},{0,13,3,0},{3,10,0,3},{10,2,1,3},{1,12,1,2},{2,0,13,1},{11,0,5,0},{12,1,3,0},{6,4,5,1},{10,4,2,0},{3,6,1,6},{7,3,6,0},{10,4,0,2},{10,0,2,4},
@@ -138,8 +144,26 @@ namespace rgbcx
 		{3,0,5,8},{0,0,15,1},{2,4,5,5},{0,3,7,6},{2,0,0,14},{1,1,12,2},{2,6,8,0},{3,1,8,4},{0,1,5,10}
 	};
 
+	// All total orderings for 16 pixels [0,2] 2-bit selectors.
+	// BC1 selector order: 0, 1, 2
+	// Note this is different from g_unique_total_orders4[], which reorders the selectors into linear order.
+	const uint32_t NUM_UNIQUE_TOTAL_ORDERINGS3 = 153;
+	static uint8_t g_unique_total_orders3[NUM_UNIQUE_TOTAL_ORDERINGS3][3] = 
+	{
+		{6,0,10},{3,6,7},{3,0,13},{13,3,0},{12,4,0},{9,1,6},{2,13,1},{4,7,5},{7,5,4},{9,6,1},{7,4,5},{8,6,2},{16,0,0},{10,6,0},{2,7,7},
+		{0,0,16},{0,3,13},{1,15,0},{0,2,14},{1,4,11},{15,1,0},{1,12,3},{9,2,5},{14,1,1},{8,2,6},{3,3,10},{4,2,10},{14,0,2},{0,14,2},{1,7,8},{6,6,4},
+		{11,5,0},{6,4,6},{11,3,2},{4,3,9},{7,1,8},{10,4,2},{12,1,3},{11,0,5},{9,3,4},{1,0,15},{9,0,7},{2,6,8},{12,2,2},{6,2,8},{6,8,2},{15,0,1},
+		{4,8,4},{0,4,12},{8,5,3},{5,9,2},{11,2,3},{12,3,1},{6,3,7},{1,1,14},{2,9,5},{1,8,7},{4,10,2},{7,7,2},{13,1,2},{0,15,1},{3,2,11},{7,0,9},
+		{4,4,8},{3,8,5},{0,5,11},{13,2,1},{1,10,5},{4,11,1},{3,10,3},{5,10,1},{10,2,4},{0,6,10},{14,2,0},{11,4,1},{3,12,1},{1,13,2},{1,5,10},{5,11,0},
+		{12,0,4},{8,1,7},{6,10,0},{3,13,0},{7,2,7},{0,7,9},{5,8,3},{0,12,4},{11,1,4},{13,0,3},{0,16,0},{5,7,4},{10,3,3},{10,0,6},{0,13,3},{4,6,6},
+		{2,8,6},{2,5,9},{7,8,1},{2,1,13},{2,0,14},{7,3,6},{5,1,10},{3,11,2},{5,4,7},{8,3,5},{10,5,1},{6,9,1},{1,3,12},{4,5,7},{2,2,12},{4,1,11},
+		{0,8,8},{4,12,0},{6,5,5},{8,7,1},{5,5,6},{3,7,6},{7,9,0},{4,9,3},{0,10,6},{8,0,8},{5,3,8},{10,1,5},{6,1,9},{7,6,3},{9,5,2},{0,1,15},
+		{9,7,0},{2,14,0},{3,4,9},{8,4,4},{9,4,3},{0,9,7},{1,9,6},{3,9,4},{5,2,9},{2,3,11},{5,6,5},{1,14,1},{6,7,3},{2,4,10},{2,12,2},{8,8,0},
+		{2,10,4},{4,0,12},{0,11,5},{2,11,3},{1,11,4},{3,5,8},{5,0,11},{3,1,12},{1,2,13},{1,6,9}
+	};
+		
 	// For each total ordering, this table indicates which other total orderings are likely to improve quality using a least squares pass. Each array is sorted by usefulness.
-	static uint16_t g_best_total_orderings[NUM_UNIQUE_TOTAL_ORDERINGS][32] = 
+	static uint16_t g_best_total_orderings4[NUM_UNIQUE_TOTAL_ORDERINGS4][32] = 
 	{
 		{ 202,120,13,318,15,23,403,450,5,51,260,128,77,21,33,494,515,523,4,141,269,1,2,700,137,49,48,102,7,64,753,82  },
 		{ 13,141,23,217,115,51,77,2,64,21,0,4,5,317,137,269,202,33,318,7,291,352,9,10,3,180,32,6,365,102,341,349  },
@@ -1112,6 +1136,163 @@ namespace rgbcx
 		{ 15,515,700,753,341,13,0,23,1,33,141,4,260,82,77,51,351,180,9,5,115,137,10,217,11,120,102,40,349,269,202,854  }
 	};
 
+	static uint8_t g_best_total_orderings3[NUM_UNIQUE_TOTAL_ORDERINGS3][32] = 
+	{
+		{ 12,1,3,5,27,2,4,38,8,7,16,18,6,10,41,79,40,23,46,9,20,88,22,37,14,19,24,126,99,119,35,11  },
+		{ 7,64,116,14,94,30,8,42,1,108,47,55,137,10,134,95,96,115,69,32,63,29,90,113,11,148,16,103,19,9,34,25  },
+		{ 12,1,0,5,3,7,4,27,8,6,38,40,41,16,18,46,9,10,20,23,79,62,14,22,88,99,37,126,92,19,120,11  },
+		{ 16,88,27,18,46,48,126,107,79,19,59,38,37,65,23,66,0,2,3,43,12,151,28,25,5,87,72,40,1,20,52,92  },
+		{ 79,48,88,16,27,65,18,38,46,19,37,4,72,33,126,41,52,0,12,92,5,1,2,107,3,77,23,91,43,51,22,74  },
+		{ 1,8,41,122,10,22,2,0,87,24,37,120,38,7,39,4,5,3,9,92,62,59,23,16,104,11,27,79,19,26,25,32  },
+		{ 2,76,99,28,40,86,93,21,138,60,6,0,17,128,145,119,98,144,141,82,147,54,67,75,5,12,27,132,146,1,38,14  },
+		{ 47,7,64,90,1,118,116,85,57,14,30,94,50,45,137,134,8,42,69,139,55,68,58,108,95,29,10,115,0,32,2,11  },
+		{ 49,8,10,30,124,11,32,113,130,58,125,9,100,53,104,115,131,103,24,7,1,39,45,36,139,0,137,22,90,44,114,105  },
+		{ 9,38,72,125,49,41,84,11,13,5,27,0,16,92,8,2,65,105,10,18,48,29,127,131,36,14,1,46,111,79,130,12  },
+		{ 130,8,10,100,104,131,49,32,53,39,30,36,113,24,11,22,124,44,83,58,7,103,1,4,9,125,5,0,91,33,115,74  },
+		{ 114,11,58,8,120,49,9,124,142,111,41,30,10,0,97,130,62,84,38,5,72,125,92,127,100,27,139,113,13,132,32,1  },
+		{ 60,46,28,27,40,20,0,17,18,2,126,16,6,38,86,23,79,54,1,93,5,88,41,14,21,111,7,48,3,84,72,62  },
+		{ 72,92,38,65,84,48,41,79,27,16,29,111,88,5,18,46,1,0,152,14,37,19,77,42,132,7,22,13,119,56,12,2  },
+		{ 7,55,1,95,29,56,64,116,143,8,14,30,47,94,152,90,65,67,10,133,42,72,146,84,16,48,6,0,25,108,77,21  },
+		{ 27,23,20,5,0,79,38,2,3,1,59,46,4,41,33,86,37,87,88,92,7,126,43,8,22,152,151,150,149,148,147,146  },
+		{ 12,0,1,2,7,6,3,5,28,4,8,14,60,40,17,19,21,86,126,93,10,18,9,29,48,99,65,25,84,119,72,41  },
+		{ 60,40,99,2,54,12,0,1,19,28,98,93,6,138,21,5,27,17,151,14,76,46,16,18,38,29,86,144,107,7,25,41  },
+		{ 12,0,1,2,3,5,6,7,4,28,8,60,14,40,16,17,21,10,19,9,86,38,126,41,93,27,29,48,62,84,79,99  },
+		{ 0,1,2,10,5,8,3,25,4,29,32,34,63,7,77,26,16,48,65,56,14,22,129,103,72,24,18,152,140,53,96,42  },
+		{ 46,126,18,54,12,16,1,0,5,2,27,98,20,23,6,3,88,48,28,7,19,8,4,60,151,38,37,21,79,14,65,40  },
+		{ 76,6,141,86,119,2,138,67,28,145,0,93,17,1,40,60,146,99,147,14,21,144,132,7,5,29,55,27,16,75,19,12  },
+		{ 71,5,51,39,22,80,0,43,10,122,8,62,41,24,104,87,35,37,2,91,33,120,36,38,1,131,9,100,130,66,3,4  },
+		{ 126,18,46,27,20,16,88,23,12,79,54,59,48,0,73,1,37,151,5,19,28,38,2,66,60,3,65,98,14,26,6,43  },
+		{ 22,10,8,5,0,71,35,80,104,39,24,51,100,1,62,32,2,130,11,41,7,9,53,43,49,83,122,120,30,44,37,38  },
+		{ 1,34,14,129,53,63,42,26,121,148,7,44,96,10,0,24,100,32,64,116,140,22,5,19,29,103,135,108,8,61,39,83  },
+		{ 1,7,34,63,44,25,135,14,24,108,22,0,83,94,5,129,35,101,47,121,2,19,42,53,6,110,103,8,148,10,16,123  },
+		{ 12,28,16,60,18,1,6,21,14,0,86,19,2,48,93,17,38,29,7,5,65,126,46,72,41,79,84,119,40,56,54,88  },
+		{ 0,2,12,27,5,46,38,40,41,79,88,99,3,23,1,62,20,4,22,37,92,35,18,8,16,24,10,60,7,120,98,54  },
+		{ 1,7,14,56,8,0,84,67,10,2,133,72,42,111,5,30,21,4,9,3,25,94,16,116,47,11,65,18,132,90,55,64  },
+		{ 30,8,124,139,45,11,58,90,113,137,7,115,10,32,1,49,94,85,9,47,108,103,0,97,63,14,50,114,53,106,100,25  },
+		{ 65,38,48,27,16,79,72,18,88,19,46,77,84,92,37,41,0,29,1,14,12,111,2,5,31,36,87,74,105,40,28,51  },
+		{ 10,8,30,113,130,100,53,32,115,103,104,7,1,121,39,49,131,44,24,36,63,137,34,45,22,90,108,83,26,11,94,139  },
+		{ 51,52,43,33,5,74,16,37,71,91,38,3,36,87,48,22,4,0,122,41,39,18,66,27,79,24,65,88,59,23,62,92  },
+		{ 1,7,63,53,108,121,94,44,103,100,14,10,129,47,32,26,24,25,148,42,135,22,0,61,83,8,39,104,5,64,115,34  },
+		{ 1,8,10,7,5,0,80,32,62,2,24,44,53,83,9,41,30,22,100,11,14,25,120,4,26,6,3,16,122,34,19,35  },
+		{ 74,4,36,48,33,91,39,79,22,16,65,5,131,38,24,71,27,52,0,105,51,18,88,104,3,31,10,37,72,19,41,130  },
+		{ 59,43,38,79,23,27,92,51,0,16,46,5,18,88,41,37,66,3,87,20,48,2,122,4,22,12,1,126,19,65,33,24  },
+		{ 12,28,1,27,0,16,2,46,65,60,21,3,5,18,6,19,48,14,4,7,79,88,86,29,22,72,93,40,23,8,17,41  },
+		{ 22,91,39,33,24,71,5,131,36,10,51,0,130,8,104,2,35,125,9,43,52,49,83,80,100,41,122,3,37,38,4,16  },
+		{ 12,0,1,2,5,3,4,8,7,27,18,38,10,6,16,46,9,20,41,23,126,79,22,14,19,99,88,54,37,48,62,35  },
+		{ 12,27,1,2,3,0,46,4,38,16,8,28,7,79,18,5,84,6,88,10,14,21,23,20,40,22,60,19,9,29,72,65  },
+		{ 1,14,7,55,95,29,8,94,30,56,10,108,77,116,152,64,32,48,63,42,143,148,16,25,137,65,11,0,115,9,19,72  },
+		{ 37,79,66,38,16,52,48,59,43,27,87,33,41,4,23,51,3,5,88,18,92,46,73,122,22,71,20,0,65,19,2,120  },
+		{ 24,32,83,22,53,1,8,10,7,30,35,5,103,0,100,101,121,113,34,123,63,2,44,25,71,115,80,14,26,108,51,39  },
+		{ 97,45,111,58,85,139,0,90,47,7,120,106,142,30,50,132,41,62,84,1,119,114,14,56,117,8,38,29,2,64,116,5  },
+		{ 12,28,16,18,1,60,6,14,2,21,0,86,126,19,48,93,7,27,17,29,5,65,54,38,72,79,84,88,119,145,8,111  },
+		{ 118,47,64,116,57,85,7,14,50,1,42,0,45,68,86,69,2,111,134,28,90,55,16,29,56,48,84,144,60,30,112,41  },
+		{ 12,1,2,0,7,6,28,5,3,4,8,14,60,21,18,40,17,86,10,9,16,29,19,93,126,79,38,84,72,27,111,119  },
+		{ 11,8,49,130,10,125,9,124,100,114,131,30,58,104,32,39,24,113,36,105,0,41,22,120,5,53,111,38,142,44,83,35  },
+		{ 50,70,47,118,85,57,106,0,45,7,64,90,81,14,2,134,28,62,86,55,69,1,78,119,68,56,18,67,16,60,29,21  },
+		{ 43,37,33,87,51,41,66,5,122,38,22,59,92,0,23,91,27,16,71,79,18,52,120,4,3,24,46,20,73,39,62,36  },
+		{ 79,48,4,16,27,88,43,33,18,38,65,37,46,3,19,51,52,22,66,87,74,5,41,91,23,59,0,71,122,72,20,92  },
+		{ 32,100,10,8,30,104,24,44,39,113,83,103,1,7,22,53,115,63,135,121,26,35,34,5,0,108,137,90,91,45,2,130  },
+		{ 0,1,2,5,16,12,6,7,14,3,19,18,29,20,4,21,40,8,17,35,23,48,126,22,25,56,26,10,98,27,38,65  },
+		{ 143,67,56,146,1,7,133,55,64,141,134,69,6,47,14,29,84,21,111,147,57,16,95,72,118,132,50,0,2,18,119,42  },
+		{ 1,7,67,14,133,111,8,84,0,21,2,47,64,132,55,10,95,147,119,42,16,5,72,56,4,3,6,29,9,25,18,30  },
+		{ 68,57,69,112,144,86,102,2,134,55,0,70,118,64,75,47,14,28,93,143,67,7,50,149,1,21,29,56,119,95,60,78  },
+		{ 58,97,114,30,124,45,11,139,8,90,0,142,7,10,41,113,84,62,49,111,85,1,9,5,137,120,32,14,2,117,47,38  },
+		{ 23,66,18,79,38,20,43,27,16,88,46,59,126,37,87,12,73,92,3,5,48,0,19,54,2,51,28,1,41,65,122,22  },
+		{ 0,12,2,27,5,40,46,38,1,41,3,79,88,23,99,4,20,62,22,54,92,18,8,37,16,35,10,7,19,120,144,24  },
+		{ 1,14,25,26,0,7,44,34,129,42,24,5,135,22,19,148,6,96,83,2,29,16,63,35,101,64,140,136,116,110,3,10  },
+		{ 12,1,2,27,3,4,38,5,7,8,18,16,46,6,0,40,41,10,79,23,88,9,20,22,14,19,37,92,48,126,28,21  },
+		{ 7,1,10,32,108,103,94,47,8,53,25,14,34,115,100,129,121,130,148,42,64,116,63,26,44,0,24,30,113,4,104,22  },
+		{ 47,134,7,14,55,69,64,95,1,29,85,118,56,116,45,57,102,143,50,90,42,30,16,94,0,8,67,75,133,2,18,48  },
+		{ 12,1,2,0,7,6,28,8,14,5,3,4,40,21,17,18,60,86,16,93,126,10,9,29,99,38,119,25,19,54,27,84  },
+		{ 59,16,27,18,23,88,79,37,46,66,38,20,73,126,3,43,48,87,92,51,41,12,19,5,52,107,65,0,151,122,54,2  },
+		{ 1,21,147,7,119,14,76,132,55,0,86,145,2,6,69,67,16,143,111,138,17,28,29,60,18,93,8,19,40,56,84,5  },
+		{ 144,86,112,2,68,102,69,0,149,93,75,28,57,55,145,60,21,67,99,134,143,40,146,119,82,110,62,6,29,26,78,14  },
+		{ 102,57,55,69,143,75,146,67,56,68,134,2,29,141,0,21,6,14,133,118,64,1,7,95,47,84,111,28,147,82,72,119  },
+		{ 0,70,57,119,50,145,2,86,28,118,69,78,149,47,60,68,67,55,93,81,134,21,14,62,64,7,5,1,132,85,41,16  },
+		{ 51,5,43,71,122,87,41,37,91,39,0,22,33,36,38,24,66,120,62,2,80,16,92,10,59,4,27,23,35,79,8,3  },
+		{ 12,1,2,0,7,6,28,5,8,14,3,21,40,4,60,17,86,18,16,93,10,9,126,119,99,29,19,41,38,27,25,92  },
+		{ 27,18,46,126,23,16,88,79,20,151,59,73,48,38,0,54,12,2,37,1,19,5,28,60,66,41,3,109,86,65,40,6  },
+		{ 48,79,4,33,16,74,65,38,88,27,91,52,18,36,22,19,46,0,37,3,51,5,71,39,72,43,24,41,92,87,2,10  },
+		{ 86,2,144,93,28,112,141,6,102,21,99,60,75,0,68,82,69,146,67,149,55,40,145,76,111,147,56,119,110,143,26,132  },
+		{ 6,138,2,99,86,17,40,93,28,21,145,141,0,60,119,147,128,76,67,54,1,12,5,27,144,14,38,98,146,41,29,19  },
+		{ 1,8,0,10,2,29,7,5,3,56,4,25,14,152,63,32,65,72,96,42,34,108,48,9,26,16,84,103,67,148,22,129  },
+		{ 149,145,0,86,2,28,93,144,62,60,119,101,21,41,5,35,78,99,26,40,12,68,57,67,110,120,69,18,55,76,132,70  },
+		{ 12,28,16,1,48,19,6,60,2,14,18,21,0,27,46,65,86,29,5,7,72,93,40,3,17,84,56,88,126,4,38,8  },
+		{ 1,8,5,10,7,24,2,62,0,41,22,122,120,9,4,3,32,87,11,37,38,83,100,44,25,104,16,26,39,80,14,6  },
+		{ 0,119,62,86,145,149,28,132,93,2,120,67,60,41,35,5,144,21,123,38,111,81,84,56,12,44,24,50,92,55,40,22  },
+		{ 2,93,99,28,40,144,60,0,86,150,76,21,149,98,6,25,1,61,82,26,12,5,54,141,7,18,145,16,27,138,110,38  },
+		{ 24,8,10,22,32,35,100,5,1,53,0,7,71,80,30,123,83,104,51,11,2,39,44,113,9,62,25,103,34,101,43,41  },
+		{ 12,1,2,0,7,6,28,5,40,60,8,16,3,18,14,4,86,21,17,93,41,10,9,99,27,119,38,19,126,22,48,145  },
+		{ 45,47,50,7,85,90,97,1,64,139,116,118,30,58,14,106,70,111,0,57,94,42,137,142,29,120,8,56,18,134,84,41  },
+		{ 12,0,2,5,27,38,1,46,41,40,79,144,3,22,88,23,28,60,99,62,6,24,26,7,4,16,10,35,37,18,14,20  },
+		{ 37,38,59,92,0,5,23,51,79,41,27,22,2,3,87,16,46,4,1,43,20,33,18,88,24,71,8,10,48,19,126,122  },
+		{ 12,28,16,60,1,18,6,21,19,14,48,0,2,86,93,5,46,29,17,27,65,7,3,72,38,126,119,40,84,37,56,4  },
+		{ 0,2,5,1,16,6,27,28,18,38,60,7,14,21,46,40,86,41,19,48,93,8,3,79,22,4,10,37,62,23,24,111  },
+		{ 85,7,90,30,47,139,45,50,94,58,137,1,8,64,14,116,118,115,113,11,124,108,0,10,97,57,32,70,42,106,29,114  },
+		{ 33,36,22,71,51,5,91,39,0,52,43,24,131,74,16,37,38,122,41,3,87,48,4,104,35,80,10,2,105,62,27,18  },
+		{ 12,1,27,2,0,16,3,28,46,18,4,6,5,72,21,79,38,7,14,60,88,8,65,19,48,29,23,40,22,20,86,126  },
+		{ 0,12,2,27,5,38,46,41,1,40,79,3,88,23,22,99,20,37,62,4,18,6,16,35,60,28,24,7,92,8,14,10  },
+		{ 7,47,1,30,137,8,116,94,90,64,14,115,108,118,57,10,148,113,42,85,32,11,63,50,103,45,124,134,55,9,69,34  },
+		{ 55,7,1,29,56,143,64,47,67,133,14,146,95,72,84,8,116,111,6,134,141,21,65,0,69,30,16,45,85,42,50,10  },
+		{ 14,1,42,8,10,29,108,63,55,148,95,32,7,19,25,115,103,34,56,129,77,0,16,152,94,30,113,26,2,5,48,4  },
+		{ 111,120,142,97,58,0,41,45,62,132,114,84,139,30,5,8,38,2,7,85,119,90,117,1,124,11,56,47,28,27,35,72  },
+		{ 1,0,14,2,6,5,16,19,7,29,42,18,3,25,12,35,21,8,26,17,40,4,20,48,109,99,22,96,55,101,10,61  },
+		{ 12,0,1,5,3,2,4,7,27,8,38,6,40,18,16,10,20,46,9,41,23,22,79,14,62,19,37,126,88,11,92,48  },
+		{ 10,8,104,39,24,32,22,83,44,100,30,130,53,91,113,5,11,1,35,33,7,49,0,2,103,71,36,124,9,80,131,34  },
+		{ 1,7,0,14,8,34,5,25,35,26,6,63,10,123,2,16,103,19,44,32,135,121,108,80,62,30,115,94,149,144,53,18  },
+		{ 75,68,146,141,102,67,2,21,6,57,69,143,0,55,82,86,28,144,147,29,93,112,56,119,133,14,76,60,84,134,111,145  },
+		{ 10,32,115,7,8,53,1,108,30,113,94,137,100,63,90,34,130,103,121,47,44,25,104,39,24,26,85,14,49,36,22,131  },
+		{ 39,24,10,22,8,130,91,104,83,49,5,33,100,11,0,35,32,131,71,36,9,44,53,2,80,51,30,1,41,7,43,62  },
+		{ 38,36,65,105,27,72,31,79,41,131,5,48,125,39,0,16,92,46,22,13,18,84,24,37,88,2,33,74,91,71,130,49  },
+		{ 0,106,62,50,45,119,85,81,132,28,2,86,41,47,38,60,35,117,5,29,7,30,145,90,55,70,14,111,18,67,93,56  },
+		{ 0,2,5,1,3,25,19,26,4,34,29,10,22,16,8,7,24,14,48,65,53,18,6,77,44,56,72,61,121,21,136,40  },
+		{ 7,1,94,8,47,115,10,32,113,103,30,108,137,63,14,64,116,148,129,42,90,25,34,118,53,57,11,49,85,9,96,50  },
+		{ 14,0,1,26,19,5,42,2,25,24,29,22,6,44,61,16,7,96,136,3,140,34,35,55,135,18,48,77,83,4,8,10  },
+		{ 1,7,14,0,25,6,34,5,26,16,63,2,19,8,35,101,108,29,94,10,18,42,123,144,129,47,61,21,3,62,149,4  },
+		{ 12,0,2,1,28,5,6,120,7,60,40,16,18,86,27,14,21,93,8,62,41,38,3,17,4,119,99,48,19,126,10,9  },
+		{ 86,144,93,2,28,149,0,60,99,112,110,145,40,21,102,26,75,62,69,1,12,101,119,25,76,67,7,68,55,5,6,14  },
+		{ 8,30,10,32,113,49,115,137,124,103,45,90,7,139,11,1,58,53,130,94,108,100,9,63,85,125,34,47,0,24,44,104  },
+		{ 120,142,111,41,58,114,97,0,11,62,84,124,5,30,8,38,132,127,27,139,92,10,72,45,49,9,28,2,29,56,16,1  },
+		{ 8,113,30,137,7,32,10,90,94,115,1,103,108,63,47,85,49,53,11,45,34,50,14,25,9,124,100,130,139,121,42,26  },
+		{ 64,7,14,47,134,55,1,42,95,69,116,90,94,30,8,29,56,137,45,108,85,10,57,16,102,143,118,19,63,32,11,50  },
+		{ 62,132,0,119,120,41,111,86,35,28,5,84,56,38,2,93,145,60,67,12,92,27,29,72,55,117,21,24,133,149,22,45  },
+		{ 57,68,69,118,134,64,50,47,55,14,7,2,102,144,0,112,70,86,85,1,95,29,116,143,42,75,16,56,28,45,21,48  },
+		{ 0,12,2,1,5,28,6,40,60,27,7,38,16,14,86,18,93,41,62,46,99,35,8,23,3,17,22,21,10,19,79,20  },
+		{ 12,1,2,27,16,3,38,111,4,0,18,5,7,46,40,8,79,6,14,28,88,10,48,41,19,84,21,9,22,23,20,72  },
+		{ 53,103,32,7,1,100,22,63,71,44,10,115,108,24,92,104,26,30,122,94,8,39,83,34,137,135,90,91,121,5,87,47  },
+		{ 87,37,41,0,22,38,2,92,1,24,4,8,3,59,10,5,39,23,71,79,122,27,16,46,33,7,91,20,18,51,9,120  },
+		{ 1,7,8,10,0,5,35,32,53,44,14,30,2,80,25,34,6,62,26,103,16,19,63,9,149,24,121,41,22,11,113,83  },
+		{ 11,58,8,30,124,49,10,113,9,114,139,45,97,32,7,137,90,1,0,130,115,125,100,24,5,94,53,41,14,13,35,38  },
+		{ 125,105,9,36,131,49,8,130,39,11,10,5,22,38,41,104,0,31,13,24,27,16,2,72,65,91,48,32,84,18,100,74  },
+		{ 12,1,0,2,6,3,7,5,4,8,14,28,16,60,18,10,21,17,19,9,40,27,86,93,29,38,54,11,25,48,46,41  },
+		{ 84,41,38,72,92,29,111,5,65,120,79,0,27,56,48,14,132,16,119,22,86,88,46,28,62,12,1,2,93,18,24,127  },
+		{ 99,28,40,60,2,93,138,0,98,17,86,54,76,12,27,1,21,144,128,38,5,14,46,18,25,16,109,6,41,145,7,29  },
+		{ 1,63,10,32,148,14,103,34,42,7,8,108,116,53,64,96,25,121,26,94,140,0,29,19,55,24,100,136,5,4,44,115  },
+		{ 131,100,130,49,10,8,36,104,39,0,48,41,11,38,4,24,27,22,16,44,79,5,33,2,53,9,125,74,91,120,32,83  },
+		{ 36,39,131,74,4,91,22,33,125,104,130,48,10,24,16,5,49,8,100,105,79,0,9,65,71,2,18,83,31,11,19,44  },
+		{ 0,12,2,1,6,5,7,28,40,60,16,14,18,62,86,27,93,8,17,38,21,41,35,99,3,19,10,23,22,4,9,48  },
+		{ 1,7,67,14,21,147,111,55,132,119,0,8,2,76,64,16,47,84,6,18,86,95,145,10,42,29,133,5,56,134,17,72  },
+		{ 69,55,47,134,102,143,7,57,118,95,14,64,29,56,1,50,75,67,146,2,0,133,68,16,21,6,141,85,116,18,72,65  },
+		{ 1,44,7,24,83,63,34,103,22,121,53,32,25,35,0,115,108,5,14,8,10,101,94,30,2,123,110,26,137,47,90,19  },
+		{ 14,1,25,42,34,0,26,96,19,29,140,5,53,10,2,121,3,24,44,22,55,77,129,7,63,16,8,4,6,61,100,48  },
+		{ 30,90,7,8,137,94,85,1,47,113,115,108,45,139,124,11,10,32,50,58,103,14,63,64,9,116,49,42,25,148,0,53  },
+		{ 40,99,2,60,28,17,0,54,93,98,86,138,6,12,21,76,1,5,27,144,128,38,19,46,14,41,145,7,16,67,3,109  },
+		{ 45,58,30,139,90,7,85,137,97,8,124,47,1,11,106,114,50,94,0,113,10,115,14,32,9,64,108,41,49,29,62,116  },
+		{ 14,42,10,1,63,96,32,25,34,8,129,29,0,103,55,19,26,53,77,5,95,2,4,7,3,16,148,56,18,24,121,108  },
+		{ 21,2,75,86,6,76,144,28,119,99,93,147,141,67,102,145,60,132,146,128,0,82,40,138,55,111,143,17,133,112,69,14  },
+		{ 111,120,41,62,84,132,0,5,38,119,56,92,72,142,27,28,29,35,58,80,2,86,65,79,12,14,1,24,145,16,21,48  },
+		{ 146,67,141,69,133,21,6,143,57,55,111,147,56,1,14,132,7,2,134,102,0,119,29,84,76,64,86,72,28,68,47,75  },
+		{ 12,1,0,5,27,3,7,4,38,8,6,41,16,40,46,10,18,79,2,9,23,86,20,22,62,14,37,88,92,19,24,11  },
+		{ 0,12,2,1,27,5,38,28,60,6,40,7,16,46,18,14,41,99,93,62,3,79,86,23,149,8,22,35,88,17,19,10  },
+		{ 141,6,21,67,147,102,146,2,76,119,132,69,55,111,86,75,28,133,143,0,1,145,14,128,56,99,17,60,29,93,84,68  },
+		{ 21,76,1,119,86,145,2,0,14,7,6,138,146,55,17,28,132,93,67,40,60,143,29,147,111,16,69,141,5,56,19,133  },
+		{ 1,8,108,14,7,116,64,42,10,63,94,32,115,103,113,96,30,34,55,47,95,148,29,140,129,25,134,53,69,26,19,11  },
+		{ 12,1,3,5,4,2,0,7,8,38,27,16,18,6,10,20,41,40,79,46,9,23,22,88,92,37,14,24,62,19,48,99  },
+		{ 1,14,7,0,6,25,5,16,19,2,42,26,29,35,61,8,18,129,101,21,3,110,34,148,96,10,17,4,22,40,12,20  },
+		{ 0,2,5,1,3,19,22,26,16,24,29,7,14,6,4,25,18,44,8,48,12,61,20,21,10,35,65,56,23,40,17,107  },
+		{ 1,7,8,29,56,0,10,14,2,42,72,5,4,65,3,30,84,94,67,9,25,133,111,11,32,108,16,63,21,96,26,48  }
+	};
+
 	static inline uint32_t iabs(int32_t i) { return (i < 0) ? static_cast<uint32_t>(-i) : static_cast<uint32_t>(i);	}
 
 	static inline uint8_t to_5(uint32_t v) { v = v * 31 + 128; return (uint8_t)((v + (v >> 8)) >> 8); }
@@ -1225,24 +1406,29 @@ namespace rgbcx
 		}
 	};
 
-	static uint16_t g_total_ordering_hash[4096];
-	static float g_selector_factors[NUM_UNIQUE_TOTAL_ORDERINGS][3];
+	static const uint32_t TOTAL_ORDER_4_0_16 = 15;
+	static const uint32_t TOTAL_ORDER_4_1_16 = 700;
+	static const uint32_t TOTAL_ORDER_4_2_16 = 753;
+	static const uint32_t TOTAL_ORDER_4_3_16 = 515;
+	static uint16_t g_total_ordering4_hash[4096];
+	static float g_selector_factors4[NUM_UNIQUE_TOTAL_ORDERINGS4][3];
 
-	const uint32_t TOTAL_ORDER_0_16 = 15;
-	const uint32_t TOTAL_ORDER_1_16 = 700;
-	const uint32_t TOTAL_ORDER_2_16 = 753;
-	const uint32_t TOTAL_ORDER_3_16 = 515;
-
-	struct hist
+	static const uint32_t TOTAL_ORDER_3_0_16 = 12;
+	static const uint32_t TOTAL_ORDER_3_1_16 = 15;
+	static const uint32_t TOTAL_ORDER_3_2_16 = 89;
+	static uint16_t g_total_ordering3_hash[256];
+	static float g_selector_factors3[NUM_UNIQUE_TOTAL_ORDERINGS3][3];
+		
+	struct hist4
 	{
 		uint8_t m_hist[4];
 
-		hist() 
+		hist4() 
 		{ 
 			memset(m_hist, 0, sizeof(m_hist)); 
 		}
 
-		hist(uint32_t i, uint32_t j, uint32_t k, uint32_t l)
+		hist4(uint32_t i, uint32_t j, uint32_t k, uint32_t l)
 		{
 			m_hist[0] = (uint8_t)i;
 			m_hist[1] = (uint8_t)j;
@@ -1250,7 +1436,7 @@ namespace rgbcx
 			m_hist[3] = (uint8_t)l;
 		}
 
-		inline bool operator== (const hist &h) const
+		inline bool operator== (const hist4 &h) const
 		{
 			if (m_hist[0] != h.m_hist[0]) return false;
 			if (m_hist[1] != h.m_hist[1]) return false;
@@ -1267,16 +1453,59 @@ namespace rgbcx
 		inline uint32_t lookup_total_ordering_index() const
 		{
 			if (m_hist[0] == 16)
-				return TOTAL_ORDER_0_16;
+				return TOTAL_ORDER_4_0_16;
 			else if (m_hist[1] == 16)
-				return TOTAL_ORDER_1_16;
+				return TOTAL_ORDER_4_1_16;
 			else if (m_hist[2] == 16)
-				return TOTAL_ORDER_2_16;
+				return TOTAL_ORDER_4_2_16;
 			else if (m_hist[3] == 16)
-				return TOTAL_ORDER_3_16;
+				return TOTAL_ORDER_4_3_16;
 
 			// Must sum to 16, so m_hist[3] isn't needed.
-			return g_total_ordering_hash[m_hist[0] | (m_hist[1] << 4) | (m_hist[2] << 8)];
+			return g_total_ordering4_hash[m_hist[0] | (m_hist[1] << 4) | (m_hist[2] << 8)];
+		}
+	};
+
+	struct hist3
+	{
+		uint8_t m_hist[3];
+
+		hist3() 
+		{ 
+			memset(m_hist, 0, sizeof(m_hist)); 
+		}
+
+		hist3(uint32_t i, uint32_t j, uint32_t k)
+		{
+			m_hist[0] = (uint8_t)i;
+			m_hist[1] = (uint8_t)j;
+			m_hist[2] = (uint8_t)k;
+		}
+
+		inline bool operator== (const hist3 &h) const
+		{
+			if (m_hist[0] != h.m_hist[0]) return false;
+			if (m_hist[1] != h.m_hist[1]) return false;
+			if (m_hist[2] != h.m_hist[2]) return false;
+			return true;
+		}
+
+		inline bool any_16() const 
+		{
+			return (m_hist[0] == 16) || (m_hist[1] == 16) || (m_hist[2] == 16);
+		}
+				
+		inline uint32_t lookup_total_ordering_index() const
+		{
+			if (m_hist[0] == 16)
+				return TOTAL_ORDER_3_0_16;
+			else if (m_hist[1] == 16)
+				return TOTAL_ORDER_3_1_16;
+			else if (m_hist[2] == 16)
+				return TOTAL_ORDER_3_2_16;
+
+			// Must sum to 16, so m_hist[2] isn't needed.
+			return g_total_ordering3_hash[m_hist[0] | (m_hist[1] << 4)];
 		}
 	};
 
@@ -1392,13 +1621,16 @@ namespace rgbcx
 
 	// This table is: 9 * (w * w), 9 * ((1.0f - w) * w), 9 * ((1.0f - w) * (1.0f - w))
 	// where w is [0,1/3,2/3,1]. 9 is the perfect multiplier.
-	static const uint32_t s_weight_vals[4] = { 0x000009, 0x010204, 0x040201, 0x090000 };
-		
-	static inline void compute_selector_factors(const hist &h, float &iz00, float &iz10, float &iz11)
+	static const uint32_t g_weight_vals4[4] = { 0x000009, 0x010204, 0x040201, 0x090000 };
+	
+	// multiplier is 4 for 3-color
+	static const uint32_t g_weight_vals3[3] = { 0x000004, 0x040000, 0x010101 };
+
+	static inline void compute_selector_factors4(const hist4 &h, float &iz00, float &iz10, float &iz11)
 	{
 		uint32_t weight_accum = 0;
 		for (uint32_t sel = 0; sel < 4; sel++)
-			weight_accum += s_weight_vals[sel] * h.m_hist[sel];
+			weight_accum += g_weight_vals4[sel] * h.m_hist[sel];
 
 		float z00 = (float)((weight_accum >> 16) & 0xFF);
 		float z10 = (float)((weight_accum >> 8) & 0xFF);
@@ -1416,13 +1648,35 @@ namespace rgbcx
 		iz11 = z00 * det;
 	}
 
+	static inline void compute_selector_factors3(const hist3 &h, float &iz00, float &iz10, float &iz11)
+	{
+		uint32_t weight_accum = 0;
+		for (uint32_t sel = 0; sel < 3; sel++)
+			weight_accum += g_weight_vals3[sel] * h.m_hist[sel];
+
+		float z00 = (float)((weight_accum >> 16) & 0xFF);
+		float z10 = (float)((weight_accum >> 8) & 0xFF);
+		float z11 = (float)(weight_accum & 0xFF);
+		float z01 = z10;
+
+		float det = z00 * z11 - z01 * z10;
+		if (fabs(det) < 1e-8f)
+			det = 0.0f;
+		else
+			det = (2.0f / 255.0f) / det;
+				
+		iz00 = z11 * det;
+		iz10 = -z10 * det;
+		iz11 = z00 * det;
+	}
+
 	static bool g_initialized;
 		
 	void encode_bc1_init(bool balance_nv_error)
 	{
 		if (g_initialized)
 			return;
-
+				
 		uint8_t bc1_expand5[32];
 		for (int i = 0; i < 32; i++)
 			bc1_expand5[i] = static_cast<uint8_t>((i << 3) | (i >> 2));
@@ -1435,18 +1689,39 @@ namespace rgbcx
 		prepare_bc1_single_color_table(g_bc1_match6_equals_1, bc1_expand6, 64, balance_nv_error);
 		prepare_bc1_single_color_table_half(g_bc1_match6_half, bc1_expand6, 64, balance_nv_error);
 
-		for (uint32_t i = 0; i < NUM_UNIQUE_TOTAL_ORDERINGS; i++)
+		for (uint32_t i = 0; i < NUM_UNIQUE_TOTAL_ORDERINGS4; i++)
 		{
-			hist h;
-			h.m_hist[0] = (uint8_t)g_unique_total_orders[i][0];
-			h.m_hist[1] = (uint8_t)g_unique_total_orders[i][1];
-			h.m_hist[2] = (uint8_t)g_unique_total_orders[i][2];
-			h.m_hist[3] = (uint8_t)g_unique_total_orders[i][3];
+			hist4 h;
+			h.m_hist[0] = (uint8_t)g_unique_total_orders4[i][0];
+			h.m_hist[1] = (uint8_t)g_unique_total_orders4[i][1];
+			h.m_hist[2] = (uint8_t)g_unique_total_orders4[i][2];
+			h.m_hist[3] = (uint8_t)g_unique_total_orders4[i][3];
 			
 			if (!h.any_16())
-				g_total_ordering_hash[h.m_hist[0] | (h.m_hist[1] << 4) | (h.m_hist[2] << 8)] = (uint16_t)i;
+			{
+				const uint32_t index = h.m_hist[0] | (h.m_hist[1] << 4) | (h.m_hist[2] << 8);
+				assert(index < 4096);
+				g_total_ordering4_hash[index] = (uint16_t)i;
+			}
 
-			compute_selector_factors(h, g_selector_factors[i][0], g_selector_factors[i][1], g_selector_factors[i][2]);
+			compute_selector_factors4(h, g_selector_factors4[i][0], g_selector_factors4[i][1], g_selector_factors4[i][2]);
+		}
+
+		for (uint32_t i = 0; i < NUM_UNIQUE_TOTAL_ORDERINGS3; i++)
+		{
+			hist3 h;
+			h.m_hist[0] = (uint8_t)g_unique_total_orders3[i][0];
+			h.m_hist[1] = (uint8_t)g_unique_total_orders3[i][1];
+			h.m_hist[2] = (uint8_t)g_unique_total_orders3[i][2];
+			
+			if (!h.any_16())
+			{
+				const uint32_t index = h.m_hist[0] | (h.m_hist[1] << 4);
+				assert(index < 256);
+				g_total_ordering3_hash[index] = (uint16_t)i;
+			}
+
+			compute_selector_factors3(h, g_selector_factors3[i][0], g_selector_factors3[i][1], g_selector_factors3[i][2]);
 		}
 
 		g_initialized = true;
@@ -1521,7 +1796,7 @@ namespace rgbcx
 
 	struct vec3F { float c[3]; };
 
-	static inline void compute_least_squares_endpoints_rgb(
+	static inline void compute_least_squares_endpoints4_rgb(
 		vec3F* pXl, vec3F* pXh,
 		int total_r, int total_g, int total_b,
 		float iz00, float iz10, float iz11,
@@ -1529,9 +1804,9 @@ namespace rgbcx
 	{
 		const float iz01 = iz10;
 
-		const uint32_t f1 = g_unique_total_orders[s][0];
-		const uint32_t f2 = g_unique_total_orders[s][0] + g_unique_total_orders[s][1];
-		const uint32_t f3 = g_unique_total_orders[s][0] + g_unique_total_orders[s][1] + g_unique_total_orders[s][2];
+		const uint32_t f1 = g_unique_total_orders4[s][0];
+		const uint32_t f2 = g_unique_total_orders4[s][0] + g_unique_total_orders4[s][1];
+		const uint32_t f3 = g_unique_total_orders4[s][0] + g_unique_total_orders4[s][1] + g_unique_total_orders4[s][2];
 		uint32_t uq00_r = (r_sum[f2] - r_sum[f1]) + (r_sum[f3] - r_sum[f2]) * 2 + (r_sum[16] - r_sum[f3]) * 3;
 		uint32_t uq00_g = (g_sum[f2] - g_sum[f1]) + (g_sum[f3] - g_sum[f2]) * 2 + (g_sum[16] - g_sum[f3]) * 3;
 		uint32_t uq00_b = (b_sum[f2] - b_sum[f1]) + (b_sum[f3] - b_sum[f2]) * 2 + (b_sum[16] - b_sum[f3]) * 3;
@@ -1549,8 +1824,8 @@ namespace rgbcx
 		pXl->c[2] = iz00 * (float)uq00_b + iz01 * q10_b;
 		pXh->c[2] = iz10 * (float)uq00_b + iz11 * q10_b;
 	}
-
-	static inline bool compute_least_squares_endpoints_rgb(const color32* pColors, const uint8_t* pSelectors, vec3F* pXl, vec3F* pXh, int total_r, int total_g, int total_b)
+		
+	static inline bool compute_least_squares_endpoints4_rgb(const color32* pColors, const uint8_t* pSelectors, vec3F* pXl, vec3F* pXh, int total_r, int total_g, int total_b)
 	{
 		uint32_t uq00_r = 0, uq00_g = 0, uq00_b = 0;
 		uint32_t weight_accum = 0;
@@ -1559,7 +1834,7 @@ namespace rgbcx
 			const uint8_t r = pColors[i].c[0], g = pColors[i].c[1], b = pColors[i].c[2];
 			const uint8_t sel = pSelectors[i];
 			
-			weight_accum += s_weight_vals[sel];
+			weight_accum += g_weight_vals4[sel];
 			uq00_r += sel * r;
 			uq00_g += sel * g;
 			uq00_b += sel * b;
@@ -1598,6 +1873,35 @@ namespace rgbcx
 		return true;
 	}
 
+	static inline void compute_least_squares_endpoints3_rgb(
+		vec3F* pXl, vec3F* pXh,
+		int total_r, int total_g, int total_b,
+		float iz00, float iz10, float iz11,
+		uint32_t s, const uint32_t r_sum[17], const uint32_t g_sum[17], const uint32_t b_sum[17])
+	{
+		const float iz01 = iz10;
+
+		// Compensates for BC1 3-color ordering, which is selector 0, 2, 1
+		const uint32_t f1 = g_unique_total_orders3[s][0];
+		const uint32_t f2 = g_unique_total_orders3[s][0] + g_unique_total_orders3[s][2];
+		uint32_t uq00_r = (r_sum[16] - r_sum[f2]) * 2 + (r_sum[f2] - r_sum[f1]);
+		uint32_t uq00_g = (g_sum[16] - g_sum[f2]) * 2 + (g_sum[f2] - g_sum[f1]);
+		uint32_t uq00_b = (b_sum[16] - b_sum[f2]) * 2 + (b_sum[f2] - b_sum[f1]);
+
+		float q10_r = (float)(total_r * 2 - uq00_r);
+		float q10_g = (float)(total_g * 2 - uq00_g);
+		float q10_b = (float)(total_b * 2 - uq00_b);
+
+		pXl->c[0] = iz00 * (float)uq00_r + iz01 * q10_r;
+		pXh->c[0] = iz10 * (float)uq00_r + iz11 * q10_r;
+
+		pXl->c[1] = iz00 * (float)uq00_g + iz01 * q10_g;
+		pXh->c[1] = iz10 * (float)uq00_g + iz11 * q10_g;
+
+		pXl->c[2] = iz00 * (float)uq00_b + iz01 * q10_b;
+		pXh->c[2] = iz10 * (float)uq00_b + iz11 * q10_b;
+	}
+
 	static inline bool compute_least_squares_endpoints3_rgb(bool use_black, const color32* pColors, const uint8_t* pSelectors, vec3F* pXl, vec3F* pXh)
 	{
 		int uq00_r = 0, uq00_g = 0, uq00_b = 0;
@@ -1616,9 +1920,8 @@ namespace rgbcx
 			assert(sel <= 3);
 			if (sel == 3)
 				continue;
-			
-			static const uint32_t s_weight_vals_3[3] = { 0x000004, 0x040000, 0x010101 };
-			weight_accum += s_weight_vals_3[sel];
+						
+			weight_accum += g_weight_vals3[sel];
 
 			static const uint8_t s_tran[3] = { 0, 2, 1 };
 			const uint8_t tsel = s_tran[sel];
@@ -1878,11 +2181,9 @@ namespace rgbcx
 		trial_hg = (trial_hg + (xh.c[1] > g_midpoint6[trial_hg])) & 63;
 		trial_hb = (trial_hb + (xh.c[2] > g_midpoint5[trial_hb])) & 31;
 	}
-		
-	static bool try_3color_block(void *pDst, const color32* pSrc_pixels, uint32_t flags, uint32_t cur_err)
+	
+	static bool try_3color_block_useblack(void *pDst, const color32* pSrc_pixels, uint32_t flags, uint32_t &cur_err)
 	{
-		const bool use_black = (flags & cEncodeBC1Use3ColorBlocksForBlackPixels) != 0;
-
 		int total_r = 0, total_g = 0, total_b = 0;
 		int max_r = 0, max_g = 0, max_b = 0;
 		int min_r = 255, min_g = 255, min_b = 255;
@@ -1890,11 +2191,8 @@ namespace rgbcx
 		for (uint32_t i = 0; i < 16; i++)
 		{
 			const int r = pSrc_pixels[i].r, g = pSrc_pixels[i].g, b = pSrc_pixels[i].b;
-			if (use_black)
-			{
-				if ((r | g | b) < 4)
-					continue;
-			}
+			if ((r | g | b) < 4)
+				continue;
 			
 			max_r = std::max(max_r, r); max_g = std::max(max_g, g); max_b = std::max(max_b, b);
 			min_r = std::min(min_r, r); min_g = std::min(min_g, g); min_b = std::min(min_b, b);
@@ -1920,11 +2218,8 @@ namespace rgbcx
 			int g = (int)pSrc_pixels[i].g;
 			int b = (int)pSrc_pixels[i].b;
 
-			if (use_black)
-			{
-				if ((r | g | b) < 4)
-					continue;
-			}
+			if ((r | g | b) < 4)
+				continue;
 
 			r -= avg_r;
 			g -= avg_g;
@@ -1968,11 +2263,8 @@ namespace rgbcx
 		{
 			int r = (int)pSrc_pixels[i].r, g = (int)pSrc_pixels[i].g, b = (int)pSrc_pixels[i].b;
 
-			if (use_black)
-			{
-				if ((r | g | b) < 4)
-					continue;
-			}
+			if ((r | g | b) < 4)
+				continue;
 
 			int dot = r * saxis_r + g * saxis_g + b * saxis_b;
 			if (dot < low_dot)
@@ -1996,7 +2288,7 @@ namespace rgbcx
 		int hb = to_5(pSrc_pixels[high_c].b);
 
 		uint8_t trial_sels[16];
-		uint32_t trial_err = bc1_find_sels3_err(use_black, pSrc_pixels, lr, lg, lb, hr, hg, hb, trial_sels, UINT32_MAX);
+		uint32_t trial_err = bc1_find_sels3_err(true, pSrc_pixels, lr, lg, lb, hr, hg, hb, trial_sels, UINT32_MAX);
 
 		if (trial_err)
 		{
@@ -2004,14 +2296,27 @@ namespace rgbcx
 			for (uint32_t trials = 0; trials < total_ls_passes; trials++)
 			{
 				vec3F xl, xh;
-				if (!compute_least_squares_endpoints3_rgb(use_black, pSrc_pixels, trial_sels, &xl, &xh))
-					break;
-
 				int lr2, lg2, lb2, hr2, hg2, hb2;
-				precise_round_565(xl, xh, lr2, lg2, lb2, hr2, hg2, hb2);
-				
+				if (!compute_least_squares_endpoints3_rgb(true, pSrc_pixels, trial_sels, &xl, &xh))
+				{
+					lr2 = g_bc1_match5_half[avg_r].m_hi;
+					lg2 = g_bc1_match6_half[avg_g].m_hi;
+					lb2 = g_bc1_match5_half[avg_b].m_hi;
+
+					hr2 = g_bc1_match5_half[avg_r].m_lo;
+					hg2 = g_bc1_match6_half[avg_g].m_lo;
+					hb2 = g_bc1_match5_half[avg_b].m_lo;
+				}
+				else
+				{
+					precise_round_565(xl, xh, lr2, lg2, lb2, hr2, hg2, hb2);
+				}
+
+				if ((lr == lr2) && (lg == lg2) && (lb == lb2) && (hr == hr2) && (hg == hg2) && (hb == hb2))
+					break;
+								
 				uint8_t trial_sels2[16];
-				uint32_t trial_err2 = bc1_find_sels3_err(use_black, pSrc_pixels, lr2, lg2, lb2, hr2, hg2, hb2, trial_sels2, trial_err);
+				uint32_t trial_err2 = bc1_find_sels3_err(true, pSrc_pixels, lr2, lg2, lb2, hr2, hg2, hb2, trial_sels2, trial_err);
 												
 				if (trial_err2 < trial_err)
 				{
@@ -2050,8 +2355,199 @@ namespace rgbcx
 				static const uint8_t s_sel_trans_inv[4] = { 1, 0, 2, 3 };
 				
 				for (uint32_t i = 0; i < 16; i++)
+					packed_sels |= ((uint32_t)s_sel_trans_inv[trial_sels[i]] << (i * 2));
+			}
+			else
+			{
+				for (uint32_t i = 0; i < 16; i++)
+					packed_sels |= ((uint32_t)trial_sels[i] << (i * 2));
+			}
+
+			pDst_block->m_selectors[0] = (uint8_t)packed_sels;
+			pDst_block->m_selectors[1] = (uint8_t)(packed_sels >> 8);
+			pDst_block->m_selectors[2] = (uint8_t)(packed_sels >> 16);
+			pDst_block->m_selectors[3] = (uint8_t)(packed_sels >> 24);
+
+			cur_err = trial_err;
+						
+			return true;
+		}
+
+		return false;
+	}
+
+	static bool try_3color_block(void *pDst, const color32* pSrc_pixels, uint32_t flags, uint32_t &cur_err, 
+		int avg_r, int avg_g, int avg_b, int lr, int lg, int lb, int hr, int hg, int hb, int total_r, int total_g, int total_b, uint32_t total_orderings_to_try)
+	{
+		uint8_t trial_sels[16];
+		uint32_t trial_err = bc1_find_sels3_err(false, pSrc_pixels, lr, lg, lb, hr, hg, hb, trial_sels, UINT32_MAX);
+
+		if (trial_err)
+		{
+			const uint32_t total_ls_passes = flags & cEncodeBC1HighQuality ? 2 : 1;
+			for (uint32_t trials = 0; trials < total_ls_passes; trials++)
+			{
+				vec3F xl, xh;
+				int lr2, lg2, lb2, hr2, hg2, hb2;
+				if (!compute_least_squares_endpoints3_rgb(false, pSrc_pixels, trial_sels, &xl, &xh))
 				{
-					assert(use_black || trial_sels[i] != 3);
+					lr2 = g_bc1_match5_half[avg_r].m_hi;
+					lg2 = g_bc1_match6_half[avg_g].m_hi;
+					lb2 = g_bc1_match5_half[avg_b].m_hi;
+
+					hr2 = g_bc1_match5_half[avg_r].m_lo;
+					hg2 = g_bc1_match6_half[avg_g].m_lo;
+					hb2 = g_bc1_match5_half[avg_b].m_lo;
+				}
+				else
+				{
+					precise_round_565(xl, xh, lr2, lg2, lb2, hr2, hg2, hb2);
+				}
+
+				if ((lr == lr2) && (lg == lg2) && (lb == lb2) && (hr == hr2) && (hg == hg2) && (hb == hb2))
+					break;
+				
+				uint8_t trial_sels2[16];
+				uint32_t trial_err2 = bc1_find_sels3_err(false, pSrc_pixels, lr2, lg2, lb2, hr2, hg2, hb2, trial_sels2, trial_err);
+												
+				if (trial_err2 < trial_err)
+				{
+					trial_err = trial_err2;
+					lr = lr2; lg = lg2; lb = lb2;
+					hr = hr2; hg = hg2; hb = hb2;
+					memcpy(trial_sels, trial_sels2, sizeof(trial_sels));
+				}
+				else
+					break;
+			}
+		}
+
+		if ((trial_err) && (flags & cEncodeBC1UseLikelyTotalOrderings))
+		{
+			hist3 h;
+			for (uint32_t i = 0; i < 16; i++)
+				h.m_hist[trial_sels[i]]++;
+
+			const uint32_t orig_total_order_index = h.lookup_total_ordering_index();
+
+			int r0, g0, b0, r3, g3, b3;
+			r0 = (lr << 3) | (lr >> 2); g0 = (lg << 2) | (lg >> 4); b0 = (lb << 3) | (lb >> 2);
+			r3 = (hr << 3) | (hr >> 2); g3 = (hg << 2) | (hg >> 4); b3 = (hb << 3) | (hb >> 2);
+
+			int ar = r3 - r0, ag = g3 - g0, ab = b3 - b0;
+																
+			int dots[16];
+			for (uint32_t i = 0; i < 16; i++)
+			{
+				int r = pSrc_pixels[i].r;
+				int g = pSrc_pixels[i].g;
+				int b = pSrc_pixels[i].b;
+				int d = 0x1000000 + (r * ar + g * ag + b * ab);
+				assert(d >= 0);
+				dots[i] = (d << 4) + i;
+			}
+
+			std::sort(dots, dots + 16);
+
+			uint32_t r_sum[17], g_sum[17], b_sum[17];
+			uint32_t r = 0, g = 0, b = 0;
+			for (uint32_t i = 0; i < 16; i++)
+			{
+				const uint32_t p = dots[i] & 15;
+
+				r_sum[i] = r;
+				g_sum[i] = g;
+				b_sum[i] = b;
+
+				r += pSrc_pixels[p].r;
+				g += pSrc_pixels[p].g;
+				b += pSrc_pixels[p].b;
+			}
+
+			r_sum[16] = total_r;
+			g_sum[16] = total_g;
+			b_sum[16] = total_b;
+						
+#if 0
+			// Try them all, for debugging.
+			for (uint32_t s = 0; s < NUM_UNIQUE_TOTAL_ORDERINGS3; s++)
+			{
+#else
+			total_orderings_to_try = clampi(total_orderings_to_try, MIN_TOTAL_ORDERINGS, MAX_TOTAL_ORDERINGS);
+			for (uint32_t q = 0; q < total_orderings_to_try; q++)
+			{
+				const uint32_t s = g_best_total_orderings3[orig_total_order_index][q];
+#endif
+				int trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb;
+
+				vec3F xl, xh;
+
+				if ((s == TOTAL_ORDER_3_0_16) || (s == TOTAL_ORDER_3_1_16) || (s == TOTAL_ORDER_3_2_16))
+				{
+					trial_lr = g_bc1_match5_half[avg_r].m_hi;
+					trial_lg = g_bc1_match6_half[avg_g].m_hi;
+					trial_lb = g_bc1_match5_half[avg_b].m_hi;
+
+					trial_hr = g_bc1_match5_half[avg_r].m_lo;
+					trial_hg = g_bc1_match6_half[avg_g].m_lo;
+					trial_hb = g_bc1_match5_half[avg_b].m_lo;
+				}
+				else
+				{
+					compute_least_squares_endpoints3_rgb(&xl, &xh, total_r, total_g, total_b, 
+						g_selector_factors3[s][0], g_selector_factors3[s][1], g_selector_factors3[s][2], s, r_sum, g_sum, b_sum);
+					
+					precise_round_565(xl, xh, trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb);
+				}
+
+				uint8_t trial_sels2[16];
+				uint32_t trial_err2 = bc1_find_sels3_err(false, pSrc_pixels, trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb, trial_sels2, trial_err);
+				
+				if (trial_err2 < trial_err)
+				{
+					trial_err = trial_err2;
+
+					lr = trial_lr;
+					lg = trial_lg;
+					lb = trial_lb;
+
+					hr = trial_hr;
+					hg = trial_hg;
+					hb = trial_hb;
+
+					memcpy(trial_sels, trial_sels2, sizeof(trial_sels));
+				}
+
+			} // s
+		}
+
+		if (trial_err < cur_err)
+		{
+			uint32_t lc16 = bc1_block::pack_unscaled_color(lr, lg, lb);
+			uint32_t hc16 = bc1_block::pack_unscaled_color(hr, hg, hb);
+
+			bool invert_flag = false;
+			if (lc16 > hc16)
+			{
+				std::swap(lc16, hc16);
+				invert_flag = true;
+			}
+
+			assert(lc16 <= hc16);
+			
+			bc1_block* pDst_block = static_cast<bc1_block*>(pDst);
+			pDst_block->set_low_color((uint16_t)lc16);
+			pDst_block->set_high_color((uint16_t)hc16);
+
+			uint32_t packed_sels = 0;
+			
+			if (invert_flag)
+			{
+				static const uint8_t s_sel_trans_inv[4] = { 1, 0, 2, 3 };
+				
+				for (uint32_t i = 0; i < 16; i++)
+				{
+					assert(trial_sels[i] != 3);
 					packed_sels |= ((uint32_t)s_sel_trans_inv[trial_sels[i]] << (i * 2));
 				}
 			}
@@ -2059,7 +2555,7 @@ namespace rgbcx
 			{
 				for (uint32_t i = 0; i < 16; i++)
 				{
-					assert(use_black || trial_sels[i] != 3);
+					assert(trial_sels[i] != 3);
 					packed_sels |= ((uint32_t)trial_sels[i] << (i * 2));
 				}
 			}
@@ -2069,13 +2565,15 @@ namespace rgbcx
 			pDst_block->m_selectors[2] = (uint8_t)(packed_sels >> 16);
 			pDst_block->m_selectors[3] = (uint8_t)(packed_sels >> 24);
 						
+			cur_err = trial_err;
+
 			return true;
 		}
 
 		return false;
 	}
 		
-	void encode_bc1(void* pDst, const uint8_t* pPixels, uint32_t flags, uint32_t total_orderings_to_try)
+	void encode_bc1(void* pDst, const uint8_t* pPixels, uint32_t flags, uint32_t total_orderings_to_try, uint32_t total_orderings_to_try3)
 	{
 		assert(g_initialized);
 
@@ -2202,6 +2700,8 @@ namespace rgbcx
 			hg = to_6(pSrc_pixels[high_c].g);
 			hb = to_5(pSrc_pixels[high_c].b);
 		}
+
+		int orig_lr = lr, orig_lg = lg, orig_lb = lb, orig_hr = hr, orig_hg = hg, orig_hb = hb;
 				
 		uint32_t cur_err = 0;
 		const bool needs_block_error = ((flags & (cEncodeBC1UseLikelyTotalOrderings | cEncodeBC1Use3ColorBlocks)) != 0) ||
@@ -2218,7 +2718,7 @@ namespace rgbcx
 			int trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb;
 
 			vec3F xl, xh;
-			if (!compute_least_squares_endpoints_rgb(pSrc_pixels, sels, &xl, &xh, total_r, total_g, total_b))
+			if (!compute_least_squares_endpoints4_rgb(pSrc_pixels, sels, &xl, &xh, total_r, total_g, total_b))
 			{
 				// All selectors equal - treat it as a solid block which should always be equal or better.
 				trial_lr = g_bc1_match5_equals_1[avg_r].m_hi;
@@ -2282,7 +2782,7 @@ namespace rgbcx
 			{
 				const uint32_t orig_err = cur_err;
 
-				hist h;
+				hist4 h;
 				for (uint32_t i = 0; i < 16; i++)
 					h.m_hist[sels[i]]++;
 
@@ -2328,19 +2828,19 @@ namespace rgbcx
 
 	#if 0
 				// Try them all, for debugging.
-				for (uint32_t s = 0; s < NUM_UNIQUE_TOTAL_ORDERINGS; s++)
+				for (uint32_t s = 0; s < NUM_UNIQUE_TOTAL_ORDERINGS4; s++)
 				{
 	#else
 				total_orderings_to_try = clampi(total_orderings_to_try, MIN_TOTAL_ORDERINGS, MAX_TOTAL_ORDERINGS);
 				for (uint32_t q = 0; q < total_orderings_to_try; q++)
 				{
-					const uint32_t s = g_best_total_orderings[orig_total_order_index][q];
+					const uint32_t s = g_best_total_orderings4[orig_total_order_index][q];
 	#endif
 					int trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb;
 
 					vec3F xl, xh;
 
-					if ((s == TOTAL_ORDER_0_16) || (s == TOTAL_ORDER_1_16) || (s == TOTAL_ORDER_2_16) || (s == TOTAL_ORDER_3_16))
+					if ((s == TOTAL_ORDER_4_0_16) || (s == TOTAL_ORDER_4_1_16) || (s == TOTAL_ORDER_4_2_16) || (s == TOTAL_ORDER_4_3_16))
 					{
 						trial_lr = g_bc1_match5_equals_1[avg_r].m_hi;
 						trial_lg = g_bc1_match6_equals_1[avg_g].m_hi;
@@ -2352,8 +2852,8 @@ namespace rgbcx
 					}
 					else
 					{
-						compute_least_squares_endpoints_rgb(&xl, &xh, total_r, total_g, total_b, 
-							g_selector_factors[s][0], g_selector_factors[s][1], g_selector_factors[s][2], s, r_sum, g_sum, b_sum);
+						compute_least_squares_endpoints4_rgb(&xl, &xh, total_r, total_g, total_b, 
+							g_selector_factors4[s][0], g_selector_factors4[s][1], g_selector_factors4[s][2], s, r_sum, g_sum, b_sum);
 					
 						precise_round_565(xl, xh, trial_lr, trial_lg, trial_lb, trial_hr, trial_hg, trial_hb);
 					}
@@ -2385,14 +2885,22 @@ namespace rgbcx
 
 		if (cur_err) 
 		{
-			if ( ((flags & cEncodeBC1Use3ColorBlocks) != 0) ||
-				  ((any_black_pixels) && ((flags & cEncodeBC1Use3ColorBlocksForBlackPixels) != 0)) )
-			{
-				assert(needs_block_error);
+			bool used_3color_mode = false;
 
-				if (try_3color_block(pDst, pSrc_pixels, flags, cur_err))
-					return;
+			if ((flags & (cEncodeBC1Use3ColorBlocks | cEncodeBC1Use3ColorBlocksForBlackPixels)) != 0)
+			{
+				if (try_3color_block(pDst, pSrc_pixels, flags, cur_err, avg_r, avg_g, avg_b, orig_lr, orig_lg, orig_lb, orig_hr, orig_hg, orig_hb, total_r, total_g, total_b, total_orderings_to_try3))
+					used_3color_mode = true;
 			}
+
+			if ((any_black_pixels) && ((flags & cEncodeBC1Use3ColorBlocksForBlackPixels) != 0))
+			{
+				if (try_3color_block_useblack(pDst, pSrc_pixels, flags, cur_err))
+					used_3color_mode = true;
+			}
+
+			if (used_3color_mode)
+				return;
 		}
 
 		uint32_t lc16 = bc1_block::pack_unscaled_color(lr, lg, lb);

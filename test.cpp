@@ -685,14 +685,15 @@ int main(int argc, char *argv[])
 	// Convert -u option to rgbcx BC1 encoder settings.
 	uint32_t rgbcx_flags = rgbcx::LEVEL0_OPTIONS;
 	uint32_t rgbcx_total_orderings_to_try = 1;
+	uint32_t rgbcx_total_orderings_to_try3 = 1;
 	switch (uber_level)
 	{
 	case 0: rgbcx_flags = rgbcx::LEVEL0_OPTIONS; break;
 	case 1: rgbcx_flags = rgbcx::LEVEL1_OPTIONS; break;
-	case 2: rgbcx_flags = rgbcx::LEVEL2_OPTIONS; rgbcx_total_orderings_to_try = rgbcx::MIN_TOTAL_ORDERINGS; break;
-	case 3: rgbcx_flags = rgbcx::LEVEL2_OPTIONS; rgbcx_total_orderings_to_try = 10; break;
-	case 4: rgbcx_flags = rgbcx::LEVEL2_OPTIONS; rgbcx_total_orderings_to_try = 16; break;
-	case 5: rgbcx_flags = rgbcx::LEVEL2_OPTIONS; rgbcx_total_orderings_to_try = rgbcx::MAX_TOTAL_ORDERINGS; break;
+	case 2: rgbcx_flags = rgbcx::LEVEL2_OPTIONS; rgbcx_total_orderings_to_try = rgbcx::MIN_TOTAL_ORDERINGS; rgbcx_total_orderings_to_try3 = rgbcx::MIN_TOTAL_ORDERINGS; break;
+	case 3: rgbcx_flags = rgbcx::LEVEL2_OPTIONS; rgbcx_total_orderings_to_try = 10; rgbcx_total_orderings_to_try3 = 2; break;
+	case 4: rgbcx_flags = rgbcx::LEVEL2_OPTIONS; rgbcx_total_orderings_to_try = 16; rgbcx_total_orderings_to_try3 = 4; break;
+	case 5: rgbcx_flags = rgbcx::LEVEL2_OPTIONS; rgbcx_total_orderings_to_try = rgbcx::MAX_TOTAL_ORDERINGS; rgbcx_total_orderings_to_try3 = rgbcx::MAX_TOTAL_ORDERINGS; break;
 	default:
 		break;
 	}
@@ -710,8 +711,8 @@ int main(int argc, char *argv[])
 	}
 	else
 	{
-		printf("Uber level: %u, flags: 0x%X, total orderings to try: %u, using 3-color mode for black: %u, use 3-color mode: %u, balance NV error: %u, iterative: %u\n", 
-			uber_level, rgbcx_flags, rgbcx_total_orderings_to_try, use_bc1_3color_mode_for_black,
+		printf("Uber level: %u, flags: 0x%X, 4-color total orderings to try: %u, 3-color total orderings to try: %u, using 3-color mode for black: %u, use 3-color mode: %u, balance NV error: %u, iterative: %u\n", 
+			uber_level, rgbcx_flags, rgbcx_total_orderings_to_try, rgbcx_total_orderings_to_try3, use_bc1_3color_mode_for_black,
 			use_bc1_3color_mode, balance_nv_error, use_bc1_iterative_mode);
 	}
 
@@ -749,7 +750,7 @@ int main(int argc, char *argv[])
 			{
 				block8* pBlock = &packed_image8[bx + by * blocks_x];
 
-				rgbcx::encode_bc1(pBlock, &pixels[0].m_c[0], rgbcx_flags, rgbcx_total_orderings_to_try);
+				rgbcx::encode_bc1(pBlock, &pixels[0].m_c[0], rgbcx_flags, rgbcx_total_orderings_to_try, rgbcx_total_orderings_to_try3);
 				break;
 			}
 			case DXGI_FORMAT_BC3_UNORM:
