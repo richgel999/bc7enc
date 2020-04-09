@@ -530,7 +530,7 @@ int main(int argc, char *argv[])
 				case 'L':
 				{
 					bc1_quality_level = atoi(pArg + 2);
-					if ((bc1_quality_level < rgbcx::MIN_LEVEL) || (bc1_quality_level > rgbcx::MAX_LEVEL))
+					if (((int)bc1_quality_level < (int)rgbcx::MIN_LEVEL) || ((int)bc1_quality_level > (int)rgbcx::MAX_LEVEL))
 					{
 						fprintf(stderr, "Invalid argument: %s\n", pArg);
 						return EXIT_FAILURE;
