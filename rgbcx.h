@@ -5,6 +5,7 @@
 // https://github.com/nothings/stb/blob/master/stb_dxt.h
 // https://gist.github.com/castano/c92c7626f288f9e99e158520b14a61cf
 // https://github.com/castano/icbc/blob/master/icbc.h
+// http://www.humus.name/index.php?page=3D&ID=79
 //
 // This is a single header file library. Be sure to "#define RGBCX_IMPLEMENTATION" in one .cpp file somewhere.
 //
