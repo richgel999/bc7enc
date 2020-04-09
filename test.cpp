@@ -32,9 +32,6 @@ static int print_usage()
 	fprintf(stderr, "By default, a DX10 DDS file and a unpacked PNG file will be written to the current\ndirectory with the .dds/_unpacked.png/_unpacked_alpha.png suffixes.\n\n");
 	fprintf(stderr, "Usage: bc7enc [-apng_filename] [options] input_filename.png [compressed_output.dds] [unpacked_output.png]\n\n");
 	fprintf(stderr, "-apng_filename Load G channel of PNG file into alpha channel of source image\n");
-	fprintf(stderr, "-l Use linear colorspace metrics instead of perceptual\n");
-	fprintf(stderr, "-uX Higher quality levels, X ranges from [0,4] (BC7) or [0,5] (BC1-5), higher=slower\n");
-	fprintf(stderr, "-pX BC7: Scan X partitions in mode 1, X ranges from [0,64], use 0 to disable mode 1 entirely (faster)\n");
 	fprintf(stderr, "-g Don't write unpacked output PNG files (this disables PSNR metrics too).\n");
 	fprintf(stderr, "-y Flip source image along Y axis before packing\n");
 	fprintf(stderr, "-o Write output files in same directory as source files\n");
@@ -42,13 +39,18 @@ static int print_usage()
 	fprintf(stderr, "-3 Encode to BC3. -u[0,5] controls quality vs. perf. tradeoff for RGB.\n");
 	fprintf(stderr, "-4 Encode to BC4\n");
 	fprintf(stderr, "-5 Encode to BC5\n");
-	fprintf(stderr, "-X# Set first BC4/5 color channel (defaults to 0 or red)\n");
-	fprintf(stderr, "-Y# Set second BC4/5 color channel (defaults to 1 or green)\n");
+	fprintf(stderr, "\n");
+	fprintf(stderr, "-X# BC4/5: Set first color channel (defaults to 0 or red)\n");
+	fprintf(stderr, "-Y# BC4/5: Set second color channel (defaults to 1 or green)\n");
+	fprintf(stderr, "\n");
+	fprintf(stderr, "-l BC7: Use linear colorspace metrics instead of perceptual\n");
+	fprintf(stderr, "-uX BC7: Higher quality levels, X ranges from [0,4]\n");
+	fprintf(stderr, "-pX BC7: Scan X partitions in mode 1, X ranges from [0,64], use 0 to disable mode 1 entirely (faster)\n");
+	fprintf(stderr, "\n");
 	fprintf(stderr, "-b BC1: Enable 3-color mode for blocks containing black or very dark pixels. (Important: engine/shader MUST ignore decoded texture alpha if this flag is enabled!)\n");
 	fprintf(stderr, "-c BC1: Disable 3-color mode for solid color blocks\n");
 	fprintf(stderr, "-n BC1: Enable balancing decoding error between ideal and NVidia hardware BC1 decoding (textures still usable on parts from other vendors)\n");
-	fprintf(stderr, "-i BC1: Enable iterative mode (much slower, but slightly higher quality)\n");
-	fprintf(stderr, "-q BC1: Use approximate PCA algorithm (around 15%% faster at -u0, slightly higher average quality on most but not all textures)\n");
+	fprintf(stderr, "-LX BC1: Set encoding level, where 0=fastest and 10=slowest but highest quality\n");
 		
 	return EXIT_FAILURE;
 }
@@ -443,9 +445,8 @@ int main(int argc, char *argv[])
 	
 	bool balance_nv_error = false;
 	bool use_bc1_3color_mode = true;
-	bool use_bc1_iterative_mode = false;
 	bool use_bc1_3color_mode_for_black = false;
-	bool use_bc1_approx_pca = false;
+	int bc1_quality_level = 2;
 
 	DXGI_FORMAT dxgi_format = DXGI_FORMAT_BC7_UNORM;
 	uint32_t pixel_format_bpp = 8;
@@ -526,6 +527,17 @@ int main(int argc, char *argv[])
 					break;
 
 				}
+				case 'L':
+				{
+					bc1_quality_level = atoi(pArg + 2);
+					if ((bc1_quality_level < rgbcx::MIN_LEVEL) || (bc1_quality_level > rgbcx::MAX_LEVEL))
+					{
+						fprintf(stderr, "Invalid argument: %s\n", pArg);
+						return EXIT_FAILURE;
+					}
+					break;
+
+				}
 				case 'g':
 				{
 					no_output_png = true;
@@ -564,16 +576,6 @@ int main(int argc, char *argv[])
 				case 'c':
 				{
 					use_bc1_3color_mode = false;
-					break;
-				}
-				case 'i':
-				{
-					use_bc1_iterative_mode = true;
-					break;
-				}
-				case 'q':
-				{
-					use_bc1_approx_pca = true;
 					break;
 				}
 				default:
@@ -689,40 +691,14 @@ int main(int argc, char *argv[])
 	pack_params.m_max_partitions_mode = max_partitions_to_scan;
 	pack_params.m_uber_level = std::min(BC7ENC_MAX_UBER_LEVEL, uber_level);
 
-	// Convert -u option to rgbcx BC1 encoder settings.
-	uint32_t rgbcx_flags = rgbcx::LEVEL0_OPTIONS;
-	uint32_t rgbcx_total_orderings_to_try = 1;
-	uint32_t rgbcx_total_orderings_to_try3 = 1;
-	switch (uber_level)
-	{
-	case 0: rgbcx_flags = rgbcx::LEVEL0_OPTIONS; break;
-	case 1: rgbcx_flags = rgbcx::LEVEL1_OPTIONS; break;
-	case 2: rgbcx_flags = rgbcx::LEVEL2_OPTIONS; rgbcx_total_orderings_to_try = rgbcx::MIN_TOTAL_ORDERINGS; rgbcx_total_orderings_to_try3 = rgbcx::MIN_TOTAL_ORDERINGS; break;
-	case 3: rgbcx_flags = rgbcx::LEVEL2_OPTIONS; rgbcx_total_orderings_to_try = 10; rgbcx_total_orderings_to_try3 = 2; break;
-	case 4: rgbcx_flags = rgbcx::LEVEL2_OPTIONS; rgbcx_total_orderings_to_try = 16; rgbcx_total_orderings_to_try3 = 4; break;
-	case 5: rgbcx_flags = rgbcx::LEVEL2_OPTIONS; rgbcx_total_orderings_to_try = rgbcx::MAX_TOTAL_ORDERINGS; rgbcx_total_orderings_to_try3 = rgbcx::MAX_TOTAL_ORDERINGS; break;
-	default:
-		break;
-	}
-
-	if (use_bc1_3color_mode_for_black)
-		rgbcx_flags |= rgbcx::cEncodeBC1Use3ColorBlocksForBlackPixels;
-	if (use_bc1_3color_mode)
-		rgbcx_flags |= rgbcx::cEncodeBC1Use3ColorBlocks;
-	if (use_bc1_iterative_mode)
-		rgbcx_flags |= rgbcx::cEncodeBC1Iterative;
-	if (use_bc1_approx_pca)
-		rgbcx_flags |= rgbcx::cEncodeBC1ApproxPCA;
-	
 	if (dxgi_format == DXGI_FORMAT_BC7_UNORM)
 	{
 		printf("Max mode 1 partitions: %u, uber level: %u, perceptual: %u\n", pack_params.m_max_partitions_mode, pack_params.m_uber_level, perceptual);
 	}
 	else
 	{
-		printf("Uber level: %u, flags: 0x%X, 4-color total orderings to try: %u, 3-color total orderings to try: %u, using 3-color mode for black: %u, use 3-color mode: %u, balance NV error: %u, iterative: %u, approx PCA: %u\n", 
-			uber_level, rgbcx_flags, rgbcx_total_orderings_to_try, rgbcx_total_orderings_to_try3, use_bc1_3color_mode_for_black,
-			use_bc1_3color_mode, balance_nv_error, use_bc1_iterative_mode, use_bc1_approx_pca);
+		printf("Level: %u, use 3-color mode: %u, use 3-color mode for black: %u, balance NV error: %u\n", 
+			bc1_quality_level, use_bc1_3color_mode, use_bc1_3color_mode_for_black, balance_nv_error);
 	}
 
 	bc7enc_compress_block_init();
@@ -759,14 +735,14 @@ int main(int argc, char *argv[])
 			{
 				block8* pBlock = &packed_image8[bx + by * blocks_x];
 
-				rgbcx::encode_bc1(pBlock, &pixels[0].m_c[0], rgbcx_flags, rgbcx_total_orderings_to_try, rgbcx_total_orderings_to_try3);
+				rgbcx::encode_bc1(bc1_quality_level, pBlock, &pixels[0].m_c[0], use_bc1_3color_mode, use_bc1_3color_mode_for_black);
 				break;
 			}
 			case DXGI_FORMAT_BC3_UNORM:
 			{
 				block16* pBlock = &packed_image16[bx + by * blocks_x];
 
-				rgbcx::encode_bc3(pBlock, &pixels[0].m_c[0], rgbcx_flags, rgbcx_total_orderings_to_try);
+				rgbcx::encode_bc3(bc1_quality_level, pBlock, &pixels[0].m_c[0]);
 				break;
 			}
 			case DXGI_FORMAT_BC4_UNORM:
@@ -836,6 +812,7 @@ int main(int argc, char *argv[])
 	{
 		image_u8 unpacked_image(source_image.width(), source_image.height());
 
+		bool punchthrough_flag = false;
 		for (uint32_t by = 0; by < blocks_y; by++)
 		{
 			for (uint32_t bx = 0; bx < blocks_x; bx++)
@@ -852,7 +829,8 @@ int main(int argc, char *argv[])
 					rgbcx::unpack_bc1(pBlock, unpacked_pixels, true);
 					break;
 				case DXGI_FORMAT_BC3_UNORM:
-					rgbcx::unpack_bc3(pBlock, unpacked_pixels);
+					if (!rgbcx::unpack_bc3(pBlock, unpacked_pixels))
+						punchthrough_flag = true;
 					break;
 				case DXGI_FORMAT_BC4_UNORM:
 					rgbcx::unpack_bc4(pBlock, &unpacked_pixels[0][0], 4);
@@ -869,8 +847,11 @@ int main(int argc, char *argv[])
 				}
 
 				unpacked_image.set_block(bx, by, 4, 4, unpacked_pixels);
-			}
-		}
+			} // bx
+		} // by
+
+		if ((punchthrough_flag) && (dxgi_format == DXGI_FORMAT_BC3_UNORM))
+			fprintf(stderr, "Warning: BC3 mode selected, but rgbcx::unpack_bc3() returned one or more blocks using 3-color mode!\n");
 
 		if ((dxgi_format != DXGI_FORMAT_BC4_UNORM) && (dxgi_format != DXGI_FORMAT_BC5_UNORM))
 		{
