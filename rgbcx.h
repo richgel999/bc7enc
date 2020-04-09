@@ -29,7 +29,7 @@ namespace rgbcx
 		cBC1AMD = 2
 	};
 
-	// Encode_bc1_init() MUST be called once before using the BC1 encoder.
+	// encode_bc1_init() MUST be called once before using the BC1 encoder.
 	//
 	// If balance_nv_error is true, the BC1 solid color tables will be slightly biased towards NVidia's hardware BC1 approximation. 
 	// The resulting encoded textures should still look good on non-NV hardware, or when decoded with software decoders.
