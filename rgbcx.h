@@ -1,4 +1,4 @@
-// rgbcx.h v1.11
+// rgbcx.h v1.12
 // High-performance scalar BC1-5 encoders. Public Domain or MIT license (you choose - see below), written by Richard Geldreich 2020 <richgel99@gmail.com>.
 //
 // Influential references:
@@ -3478,7 +3478,7 @@ namespace rgbcx
 	void encode_bc1(void* pDst, const uint8_t* pPixels, uint32_t flags, uint32_t total_orderings_to_try, uint32_t total_orderings_to_try3)
 	{
 		assert(g_initialized);
-
+				
 		const color32* pSrc_pixels = (const color32*)pPixels;
 		bc1_block* pDst_block = static_cast<bc1_block*>(pDst);
 		
@@ -3493,7 +3493,7 @@ namespace rgbcx
 
 		if (j == 0)
 		{
-			encode_bc1_solid_block(pDst, fr, fg, fb, (flags & cEncodeBC1Use3ColorBlocks) != 0);
+			encode_bc1_solid_block(pDst, fr, fg, fb, (flags & (cEncodeBC1Use3ColorBlocks | cEncodeBC1Use3ColorBlocksForBlackPixels)) != 0);
 			return;
 		}
 
@@ -3792,12 +3792,15 @@ namespace rgbcx
 												
 		if ( ((flags & (cEncodeBC1Use3ColorBlocks | cEncodeBC1Use3ColorBlocksForBlackPixels)) != 0) && (cur_err) )
 		{
-			assert(needs_block_error);
-
-			try_3color_block(pSrc_pixels, flags, cur_err, avg_r, avg_g, avg_b, orig_lr, orig_lg, orig_lb, orig_hr, orig_hg, orig_hb, total_r, total_g, total_b, total_orderings_to_try3, results);
+			if (flags & cEncodeBC1Use3ColorBlocks)
+			{
+				assert(needs_block_error);
+				try_3color_block(pSrc_pixels, flags, cur_err, avg_r, avg_g, avg_b, orig_lr, orig_lg, orig_lb, orig_hr, orig_hg, orig_hb, total_r, total_g, total_b, total_orderings_to_try3, results);
+			}
 
 			if ((any_black_pixels) && ((flags & cEncodeBC1Use3ColorBlocksForBlackPixels) != 0))
 			{
+				assert(needs_block_error);
 				try_3color_block_useblack(pSrc_pixels, flags, cur_err, results);
 			}
 		}
