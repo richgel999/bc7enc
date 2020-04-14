@@ -49,9 +49,11 @@ static int print_usage()
 	fprintf(stderr, "\n");
 	fprintf(stderr, "-b BC1: Enable 3-color mode for blocks containing black or very dark pixels. (Important: engine/shader MUST ignore decoded texture alpha if this flag is enabled!)\n");
 	fprintf(stderr, "-c BC1: Disable 3-color mode for solid color blocks\n");
-	fprintf(stderr, "-n BC1: Encode for NVidia GPU's\n");
-	fprintf(stderr, "-m BC1: Encode for AMD GPU's\n");
+	fprintf(stderr, "-n BC1: Encode/decode for NVidia GPU's\n");
+	fprintf(stderr, "-m BC1: Encode/decode for AMD GPU's\n");
+	fprintf(stderr, "-r BC1: Encode/decode using ideal BC1 formulas with rounding for 4-color block colors 2,3 (same as AMD Compressonator)\n");
 	fprintf(stderr, "-LX BC1: Set encoding level, where 0=fastest and 19=slowest but highest quality\n");
+	fprintf(stderr, "\nBy default, this tool encodes to BC1 without rounding 4-color block colors 2,3, which may not match the output of some software decoders.\n");
 		
 	return EXIT_FAILURE;
 }
@@ -569,6 +571,11 @@ int main(int argc, char *argv[])
 					bc1_mode = rgbcx::bc1_approx_mode::cBC1AMD;
 					break;
 				}
+				case 'r':
+				{
+					bc1_mode = rgbcx::bc1_approx_mode::cBC1IdealRound4;
+					break;
+				}
 				case 'o':
 				{
 					out_same_dir = true;
@@ -636,7 +643,7 @@ int main(int argc, char *argv[])
 
 	png_alpha_output_filename = png_output_filename;
 	strip_extension(png_alpha_output_filename);
-	png_alpha_output_filename += "_unpacked_alpha.png";
+	png_alpha_output_filename += "_alpha.png";
 		
 	image_u8 source_image;
 	if (!load_png(src_filename.c_str(), source_image))

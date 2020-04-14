@@ -1,4 +1,4 @@
-// rgbcx.h v1.10
+// rgbcx.h v1.11
 // High-performance scalar BC1-5 encoders. Public Domain or MIT license (you choose - see below), written by Richard Geldreich 2020 <richgel99@gmail.com>.
 //
 // Influential references:
@@ -72,9 +72,17 @@ namespace rgbcx
 {
 	enum class bc1_approx_mode
 	{
+		// The default mode. No rounding for 4-color colors 2,3. My older tools/compressors use this mode. 
 		cBC1Ideal = 0,
+
+		// NVidia GPU mode.
 		cBC1NVidia = 1,
-		cBC1AMD = 2
+
+		// AMD GPU mode.
+		cBC1AMD = 2,
+		
+		// This mode matches AMD Compressonator's output. It rounds 4-color colors 2,3 (not not 3-color color 2).
+		cBC1IdealRound4 = 3
 	};
 
 	// init() MUST be called once before using the BC1 encoder.
@@ -1643,6 +1651,7 @@ namespace rgbcx
 	// v0, v1 = unexpanded DXT1 endpoint values (5/6-bits)
 	// c0, c1 = expanded DXT1 endpoint values (8-bits)
 	static inline int interp_5_6_ideal(int c0, int c1) { assert(c0 < 256 && c1 < 256); return (c0 * 2 + c1) / 3; }
+	static inline int interp_5_6_ideal_round(int c0, int c1) { assert(c0 < 256 && c1 < 256); return (c0 * 2 + c1 + 1) / 3; }
 	static inline int interp_half_5_6_ideal(int c0, int c1) { assert(c0 < 256 && c1 < 256); return (c0 + c1) / 2; }
 
 	static inline int interp_5_nv(int v0, int v1) {	assert(v0 < 32 && v1 < 32); return ((2 * v0 + v1) * 22) / 8; }
@@ -1663,6 +1672,7 @@ namespace rgbcx
 		case bc1_approx_mode::cBC1AMD: return interp_5_6_amd(c0, c1);
 		default:
 		case bc1_approx_mode::cBC1Ideal: return interp_5_6_ideal(c0, c1);		
+		case bc1_approx_mode::cBC1IdealRound4: return interp_5_6_ideal_round(c0, c1);		
 		}
 	}
 
@@ -1676,6 +1686,7 @@ namespace rgbcx
 		case bc1_approx_mode::cBC1AMD: return interp_5_6_amd(c0, c1);
 		default:
 		case bc1_approx_mode::cBC1Ideal: return interp_5_6_ideal(c0, c1);		
+		case bc1_approx_mode::cBC1IdealRound4: return interp_5_6_ideal_round(c0, c1);		
 		}
 	}
 
@@ -1686,8 +1697,10 @@ namespace rgbcx
 		{
 		case bc1_approx_mode::cBC1NVidia: return interp_half_5_nv(v0, v1); 
 		case bc1_approx_mode::cBC1AMD: return interp_half_5_6_amd(c0, c1);
+		case bc1_approx_mode::cBC1Ideal: 
+		case bc1_approx_mode::cBC1IdealRound4: 
 		default:
-		case bc1_approx_mode::cBC1Ideal: return interp_half_5_6_ideal(c0, c1);		
+			return interp_half_5_6_ideal(c0, c1);		
 		}
 	}
 
@@ -1699,8 +1712,10 @@ namespace rgbcx
 		{
 		case bc1_approx_mode::cBC1NVidia: return interp_half_6_nv(c0, c1); 
 		case bc1_approx_mode::cBC1AMD: return interp_half_5_6_amd(c0, c1);
+		case bc1_approx_mode::cBC1Ideal: 
+		case bc1_approx_mode::cBC1IdealRound4: 
 		default:
-		case bc1_approx_mode::cBC1Ideal: return interp_half_5_6_ideal(c0, c1);		
+			return interp_half_5_6_ideal(c0, c1);		
 		}
 	}
 
@@ -1722,7 +1737,7 @@ namespace rgbcx
 					int e = iabs(v - i);
 
 					// We only need to factor in 3% error in BC1 ideal mode.
-					if (mode == bc1_approx_mode::cBC1Ideal)
+					if ((mode == bc1_approx_mode::cBC1Ideal) || (mode == bc1_approx_mode::cBC1IdealRound4))
 						e += (iabs(hi_e - lo_e) * 3) / 100;
 
 					// Favor equal endpoints, for lower error on actual GPU's which approximate the interpolation.
@@ -1759,7 +1774,7 @@ namespace rgbcx
 					
 					int e = iabs(v - i);
 
-					if (mode == bc1_approx_mode::cBC1Ideal)
+					if ((mode == bc1_approx_mode::cBC1Ideal) || (mode == bc1_approx_mode::cBC1IdealRound4))
 						e += (iabs(hi_e - lo_e) * 3) / 100;
 
 					// Favor equal endpoints, for lower error on actual GPU's which approximate the interpolation.
@@ -2136,6 +2151,11 @@ namespace rgbcx
 			block_r[1] = (block_r[0] * 2 + block_r[3]) / 3;	block_g[1] = (block_g[0] * 2 + block_g[3]) / 3;	block_b[1] = (block_b[0] * 2 + block_b[3]) / 3;
 			block_r[2] = (block_r[3] * 2 + block_r[0]) / 3;	block_g[2] = (block_g[3] * 2 + block_g[0]) / 3;	block_b[2] = (block_b[3] * 2 + block_b[0]) / 3;
 		}
+		else if (g_bc1_approx_mode == bc1_approx_mode::cBC1IdealRound4)
+		{
+			block_r[1] = (block_r[0] * 2 + block_r[3] + 1) / 3;	block_g[1] = (block_g[0] * 2 + block_g[3] + 1) / 3;	block_b[1] = (block_b[0] * 2 + block_b[3] + 1) / 3;
+			block_r[2] = (block_r[3] * 2 + block_r[0] + 1) / 3;	block_g[2] = (block_g[3] * 2 + block_g[0] + 1) / 3;	block_b[2] = (block_b[3] * 2 + block_b[0] + 1) / 3;
+		}
 		else if (g_bc1_approx_mode == bc1_approx_mode::cBC1AMD)
 		{
 			block_r[1] = interp_5_6_amd(block_r[0], block_r[3]); block_g[1] = interp_5_6_amd(block_g[0], block_g[3]); block_b[1] = interp_5_6_amd(block_b[0], block_b[3]);
@@ -2153,7 +2173,7 @@ namespace rgbcx
 		block_r[0] = (lr << 3) | (lr >> 2); block_g[0] = (lg << 2) | (lg >> 4);	block_b[0] = (lb << 3) | (lb >> 2);
 		block_r[1] = (hr << 3) | (hr >> 2);	block_g[1] = (hg << 2) | (hg >> 4);	block_b[1] = (hb << 3) | (hb >> 2);
 
-		if (g_bc1_approx_mode == bc1_approx_mode::cBC1Ideal)
+		if ((g_bc1_approx_mode == bc1_approx_mode::cBC1Ideal) || (g_bc1_approx_mode == bc1_approx_mode::cBC1IdealRound4))
 		{
 			block_r[2] = (block_r[0] + block_r[1]) / 2; block_g[2] = (block_g[0] + block_g[1]) / 2; block_b[2] = (block_b[0] + block_b[1]) / 2;
 		}
@@ -4046,6 +4066,10 @@ namespace rgbcx
 					c[2].set_noclamp_rgba((r0 * 2 + r1) / 3, (g0 * 2 + g1) / 3, (b0 * 2 + b1) / 3, 255);
 					c[3].set_noclamp_rgba((r1 * 2 + r0) / 3, (g1 * 2 + g0) / 3, (b1 * 2 + b0) / 3, 255);
 					break;
+				case bc1_approx_mode::cBC1IdealRound4:
+					c[2].set_noclamp_rgba((r0 * 2 + r1 + 1) / 3, (g0 * 2 + g1 + 1) / 3, (b0 * 2 + b1 + 1) / 3, 255);
+					c[3].set_noclamp_rgba((r1 * 2 + r0 + 1) / 3, (g1 * 2 + g0 + 1) / 3, (b1 * 2 + b0 + 1) / 3, 255);
+					break;
 				case bc1_approx_mode::cBC1NVidia:
 					c[2].set_noclamp_rgba(interp_5_nv(cr0, cr1), interp_6_nv(g0, g1), interp_5_nv(cb0, cb1), 255);
 					c[3].set_noclamp_rgba(interp_5_nv(cr1, cr0), interp_6_nv(g1, g0), interp_5_nv(cb1, cb0), 255);
@@ -4063,6 +4087,7 @@ namespace rgbcx
 			switch (mode)
 			{
 				case bc1_approx_mode::cBC1Ideal:
+				case bc1_approx_mode::cBC1IdealRound4:
 					c[2].set_noclamp_rgba((r0 + r1) / 2, (g0 + g1) / 2, (b0 + b1) / 2, 255);
 					break;
 				case bc1_approx_mode::cBC1NVidia:
