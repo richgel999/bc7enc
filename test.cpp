@@ -49,8 +49,9 @@ static int print_usage()
 	fprintf(stderr, "\n");
 	fprintf(stderr, "-b BC1: Enable 3-color mode for blocks containing black or very dark pixels. (Important: engine/shader MUST ignore decoded texture alpha if this flag is enabled!)\n");
 	fprintf(stderr, "-c BC1: Disable 3-color mode for solid color blocks\n");
-	fprintf(stderr, "-n BC1: Enable balancing decoding error between ideal and NVidia hardware BC1 decoding (textures still usable on parts from other vendors)\n");
-	fprintf(stderr, "-LX BC1: Set encoding level, where 0=fastest and 10=slowest but highest quality\n");
+	fprintf(stderr, "-n BC1: Encode for NVidia GPU's\n");
+	fprintf(stderr, "-m BC1: Encode for AMD GPU's\n");
+	fprintf(stderr, "-LX BC1: Set encoding level, where 0=fastest and 19=slowest but highest quality\n");
 		
 	return EXIT_FAILURE;
 }
@@ -443,7 +444,7 @@ int main(int argc, char *argv[])
 	uint32_t bc45_channel0 = 0;
 	uint32_t bc45_channel1 = 1;
 	
-	bool balance_nv_error = false;
+	rgbcx::bc1_approx_mode bc1_mode = rgbcx::bc1_approx_mode::cBC1Ideal;
 	bool use_bc1_3color_mode = true;
 	bool use_bc1_3color_mode_for_black = false;
 	int bc1_quality_level = 2;
@@ -530,7 +531,7 @@ int main(int argc, char *argv[])
 				case 'L':
 				{
 					bc1_quality_level = atoi(pArg + 2);
-					if (((int)bc1_quality_level < (int)rgbcx::MIN_LEVEL) || ((int)bc1_quality_level > (int)rgbcx::MAX_LEVEL))
+					if (((int)bc1_quality_level < (int)rgbcx::MIN_LEVEL) || ((int)bc1_quality_level > (int)(rgbcx::MAX_LEVEL + 1)))
 					{
 						fprintf(stderr, "Invalid argument: %s\n", pArg);
 						return EXIT_FAILURE;
@@ -560,7 +561,12 @@ int main(int argc, char *argv[])
 				}
 				case 'n':
 				{
-					balance_nv_error = true;
+					bc1_mode = rgbcx::bc1_approx_mode::cBC1NVidia;
+					break;
+				}
+				case 'm':
+				{
+					bc1_mode = rgbcx::bc1_approx_mode::cBC1AMD;
 					break;
 				}
 				case 'o':
@@ -697,12 +703,12 @@ int main(int argc, char *argv[])
 	}
 	else
 	{
-		printf("Level: %u, use 3-color mode: %u, use 3-color mode for black: %u, balance NV error: %u\n", 
-			bc1_quality_level, use_bc1_3color_mode, use_bc1_3color_mode_for_black, balance_nv_error);
+		printf("Level: %u, use 3-color mode: %u, use 3-color mode for black: %u, bc1_mode: %u\n", 
+			bc1_quality_level, use_bc1_3color_mode, use_bc1_3color_mode_for_black, (int)bc1_mode);
 	}
 
 	bc7enc_compress_block_init();
-	rgbcx::encode_bc1_init(balance_nv_error);
+	rgbcx::init(bc1_mode);
 
 	bool has_alpha = false;
 
@@ -826,10 +832,10 @@ int main(int argc, char *argv[])
 				switch (dxgi_format)
 				{
 				case DXGI_FORMAT_BC1_UNORM:
-					rgbcx::unpack_bc1(pBlock, unpacked_pixels, true);
+					rgbcx::unpack_bc1(pBlock, unpacked_pixels, true, bc1_mode);
 					break;
 				case DXGI_FORMAT_BC3_UNORM:
-					if (!rgbcx::unpack_bc3(pBlock, unpacked_pixels))
+					if (!rgbcx::unpack_bc3(pBlock, unpacked_pixels, bc1_mode))
 						punchthrough_flag = true;
 					break;
 				case DXGI_FORMAT_BC4_UNORM:
@@ -886,6 +892,9 @@ int main(int argc, char *argv[])
 			static const char *s_chan_names[4] = { "Red  ", "Green", "Blue ", "Alpha" };
 			printf("%s Max error: %3.0f RMSE: %f PSNR %03.02f dB\n", s_chan_names[chan], c_metrics.m_max, c_metrics.m_root_mean_squared, c_metrics.m_peak_snr);
 		}
+
+		if (bc1_mode != rgbcx::bc1_approx_mode::cBC1Ideal)
+			printf("Note: BC1/BC3 RGB decoding was done with the specified vendor's BC1 approximations.\n");
 
 		if (!save_png(png_output_filename.c_str(), unpacked_image, false))
 			failed = true;
