@@ -81,7 +81,7 @@ namespace rgbcx
 		// AMD GPU mode.
 		cBC1AMD = 2,
 		
-		// This mode matches AMD Compressonator's output. It rounds 4-color colors 2,3 (not not 3-color color 2).
+		// This mode matches AMD Compressonator's output. It rounds 4-color colors 2,3 (not 3-color color 2).
 		cBC1IdealRound4 = 3
 	};
 
