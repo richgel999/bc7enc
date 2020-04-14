@@ -73,6 +73,7 @@ namespace rgbcx
 	enum class bc1_approx_mode
 	{
 		// The default mode. No rounding for 4-color colors 2,3. My older tools/compressors use this mode. 
+		// This matches the D3D10 docs on BC1.
 		cBC1Ideal = 0,
 
 		// NVidia GPU mode.
@@ -82,6 +83,7 @@ namespace rgbcx
 		cBC1AMD = 2,
 		
 		// This mode matches AMD Compressonator's output. It rounds 4-color colors 2,3 (not 3-color color 2).
+		// This matches the D3D9 docs on DXT1.
 		cBC1IdealRound4 = 3
 	};
 
