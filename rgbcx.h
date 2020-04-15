@@ -14,7 +14,7 @@
 //
 // The library MUST be initialized by calling this function at least once before using any encoder or decoder functions:
 //
-// void init(bc1_approx_mode mode = cBC1Ideal);
+// void rgbcx::init(bc1_approx_mode mode = cBC1Ideal);
 //
 // This function manipulates global state, so it is not thread safe. 
 // You can call it multiple times to change the global BC1 approximation mode.
@@ -23,10 +23,10 @@
 // If in doubt, encode in ideal BC1 mode.
 //
 // Call these functions to encode BC1-5:
-// void encode_bc1(uint32_t level, void* pDst, const uint8_t* pPixels, bool allow_3color, bool use_transparent_texels_for_black);
-// void encode_bc3(uint32_t level, void* pDst, const uint8_t* pPixels);
-// void encode_bc4(void* pDst, const uint8_t* pPixels, uint32_t stride = 4);
-// void encode_bc5(void* pDst, const uint8_t* pPixels, uint32_t chan0 = 0, uint32_t chan1 = 1, uint32_t stride = 4);
+// void rgbcx::encode_bc1(uint32_t level, void* pDst, const uint8_t* pPixels, bool allow_3color, bool use_transparent_texels_for_black);
+// void rgbcx::encode_bc3(uint32_t level, void* pDst, const uint8_t* pPixels);
+// void rgbcx::encode_bc4(void* pDst, const uint8_t* pPixels, uint32_t stride = 4);
+// void rgbcx::encode_bc5(void* pDst, const uint8_t* pPixels, uint32_t chan0 = 0, uint32_t chan1 = 1, uint32_t stride = 4);
 //
 // - level ranges from MIN_LEVEL to MAX_LEVEL. The higher the level, the slower the encoder goes, but the higher the average quality.
 // levels [0,4] are fast and compete against stb_dxt (default and HIGHQUAL). The remaining levels compete against squish/NVTT/icbc and icbc HQ.
