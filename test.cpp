@@ -1,4 +1,4 @@
-// test.cpp - bc7enc17.c command line example/test app
+// test.cpp - Command line example/test app
 #ifdef _MSC_VER
 #define _CRT_SECURE_NO_WARNINGS
 #endif
@@ -28,7 +28,7 @@ template <typename S> inline S clamp(S value, S low, S high) { return (value < l
 static int print_usage()
 {
 	fprintf(stderr, "bc7enc\n");
-	fprintf(stderr, "Reads PNG files (with or without alpha channels) and packs them to BC1-5 or BC7/BPTC using\nmodes 1, 6 (opaque blocks) or modes 1, 5, 6, and 7 (alpha blocks).\n");
+	fprintf(stderr, "Reads PNG files (with or without alpha channels) and packs them to BC1-5 or BC7/BPTC (default) using\nmodes 1, 6 (opaque blocks) or modes 1, 5, 6, and 7 (alpha blocks).\n");
 	fprintf(stderr, "By default, a DX10 DDS file and a unpacked PNG file will be written to the current\ndirectory with the .dds/_unpacked.png/_unpacked_alpha.png suffixes.\n\n");
 	fprintf(stderr, "Usage: bc7enc [-apng_filename] [options] input_filename.png [compressed_output.dds] [unpacked_output.png]\n\n");
 	fprintf(stderr, "-apng_filename Load G channel of PNG file into alpha channel of source image\n");
@@ -44,7 +44,7 @@ static int print_usage()
 	fprintf(stderr, "-Y# BC4/5: Set second color channel (defaults to 1 or green)\n");
 	fprintf(stderr, "\n");
 	fprintf(stderr, "-l BC7: Use linear colorspace metrics instead of perceptual\n");
-	fprintf(stderr, "-uX BC7: Higher quality levels, X ranges from [0,4]\n");
+	fprintf(stderr, "-uX BC1/3/7: Higher quality levels, X ranges from [0,4] for BC7, or [0,5] for BC1-3\n");
 	fprintf(stderr, "-pX BC7: Scan X partitions in mode 1, X ranges from [0,64], use 0 to disable mode 1 entirely (faster)\n");
 	fprintf(stderr, "\n");
 	fprintf(stderr, "-b BC1: Enable 3-color mode for blocks containing black or very dark pixels. (Important: engine/shader MUST ignore decoded texture alpha if this flag is enabled!)\n");
@@ -627,7 +627,7 @@ int main(int argc, char *argv[])
 	{
 		dds_output_filename = src_filename;
 		strip_extension(dds_output_filename);
-		if (!out_same_dir)
+		if (out_same_dir)
 			strip_path(dds_output_filename);
 		dds_output_filename += ".dds";
 	}
@@ -636,7 +636,7 @@ int main(int argc, char *argv[])
 	{
 		png_output_filename = src_filename;
 		strip_extension(png_output_filename);
-		if (!out_same_dir)
+		if (out_same_dir)
 			strip_path(png_output_filename);
 		png_output_filename += "_unpacked.png";
 	}
