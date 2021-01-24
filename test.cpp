@@ -34,7 +34,7 @@ static int print_usage()
 	fprintf(stderr, "-apng_filename Load G channel of PNG file into alpha channel of source image\n");
 	fprintf(stderr, "-g Don't write unpacked output PNG files (this disables PSNR metrics too).\n");
 	fprintf(stderr, "-y Flip source image along Y axis before packing\n");
-	fprintf(stderr, "-o Write output files in same directory as source files\n");
+	fprintf(stderr, "-o Write output files to the current directory\n");
 	fprintf(stderr, "-1 Encode to BC1. -u[0,5] controls quality vs. perf. tradeoff for RGB.\n");
 	fprintf(stderr, "-3 Encode to BC3. -u[0,5] controls quality vs. perf. tradeoff for RGB.\n");
 	fprintf(stderr, "-4 Encode to BC4\n");
@@ -54,6 +54,7 @@ static int print_usage()
 	fprintf(stderr, "-r BC1: Encode/decode using ideal BC1 formulas with rounding for 4-color block colors 2,3 (same as AMD Compressonator)\n");
 	fprintf(stderr, "-LX BC1: Set encoding level, where 0=fastest and 19=slowest but highest quality\n");
 	fprintf(stderr, "\nBy default, this tool encodes to BC1 without rounding 4-color block colors 2,3, which may not match the output of some software decoders.\n");
+	fprintf(stderr, "This tool writes DX10-style .DDS files, which not all tools support. AMD Compressonator and PVRTexTool do.\n");
 		
 	return EXIT_FAILURE;
 }
@@ -437,7 +438,7 @@ int main(int argc, char *argv[])
 	std::string png_alpha_output_filename;
 
 	bool no_output_png = false;
-	bool out_same_dir = false;
+	bool out_cur_dir = false;
 
 	int uber_level = 0;
 	int max_partitions_to_scan = BC7ENC_MAX_PARTITIONS1;
@@ -578,7 +579,7 @@ int main(int argc, char *argv[])
 				}
 				case 'o':
 				{
-					out_same_dir = true;
+					out_cur_dir = true;
 					break;
 				}
 				case 'b':
@@ -627,7 +628,7 @@ int main(int argc, char *argv[])
 	{
 		dds_output_filename = src_filename;
 		strip_extension(dds_output_filename);
-		if (out_same_dir)
+		if (out_cur_dir)
 			strip_path(dds_output_filename);
 		dds_output_filename += ".dds";
 	}
@@ -636,7 +637,7 @@ int main(int argc, char *argv[])
 	{
 		png_output_filename = src_filename;
 		strip_extension(png_output_filename);
-		if (out_same_dir)
+		if (out_cur_dir)
 			strip_path(png_output_filename);
 		png_output_filename += "_unpacked.png";
 	}
