@@ -9,7 +9,7 @@ The BC1/BC3 encoder also implements [Castano's optimal endpoint rounding improve
 
 rgbcx's BC1 encoder is faster than both AMD Compressonator and libsquish at the same average quality.
 
-- BC7 encoder (in bc7enc.c/.h) has perceptual colorspace metric support, and is very fast compared to ispc_texcomp (see below) for RGB textures. Important: The BC7 encoder included in this repo is still a work in progress. I took bc7enc16 and added more modes for better alpha support, but it needs more testing and development.
+- BC7 encoder (in bc7enc.c/.h) has perceptual colorspace metric support, and is very fast compared to ispc_texcomp (see below) for RGB textures. Important: The BC7 encoder included in this repo is still a work in progress. I took bc7enc16 and added more modes for better alpha support, but it needs more testing and development. My best BC7 encoder is BC7E, located here: https://github.com/BinomialLLC/bc7e
 
 - Full decoders for BC1-5/7. BC7 decoder is in bc7decomp.cpp/.h, BC1-5 decoders in rgbcx.h.
 
