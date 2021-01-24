@@ -1,5 +1,7 @@
 bc7enc - Fast, single source file BC1-5 and BC7/BPTC GPU texture encoders.
 
+To compile: Use CMake, and run "cmake ." in the project's root directory to generate either a Visual Studio .SLN file or make files.
+
 Features:
 - BC1/3 encoder (in [rgbcx.h](https://github.com/richgel999/bc7enc/blob/master/rgbcx.h)) uses a new algorithm (which we've named "prioritized cluster fit") which is 3-4x faster than traditional cluster fit (as implemented in [libsquish](https://github.com/svn2github/libsquish) with SSE2) at the same or slightly higher average quality using scalar CPU instructions. This algorithm is suitable for GPU encoder implementations.
 
