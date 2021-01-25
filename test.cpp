@@ -53,9 +53,10 @@ static int print_usage()
 	fprintf(stderr, "-m BC1: Encode/decode for AMD GPU's\n");
 	fprintf(stderr, "-r BC1: Encode/decode using ideal BC1 formulas with rounding for 4-color block colors 2,3 (same as AMD Compressonator)\n");
 	fprintf(stderr, "-LX BC1: Set encoding level, where 0=fastest and 19=slowest but highest quality\n");
+	fprintf(stderr, "-f Force writing DX10-style DDS files (otherwise for BC1-5 it uses DX9-style DDS files)\n");
 	fprintf(stderr, "\nBy default, this tool encodes to BC1 without rounding 4-color block colors 2,3, which may not match the output of some software decoders.\n");
-	fprintf(stderr, "This tool writes DX10-style .DDS files, which not all tools support. AMD Compressonator and PVRTexTool do.\n");
-		
+	fprintf(stderr, "\nFor BC4 and BC5: Not all tools support reading DX9-style BC4/BC5 format files (or BC4/5 files at all). AMD Compressonator does.\n");
+			
 	return EXIT_FAILURE;
 }
 
@@ -343,7 +344,7 @@ struct block16
 
 typedef std::vector<block16> block16_vec;
 
-static bool save_dds(const char *pFilename, uint32_t width, uint32_t height, const void *pBlocks, uint32_t pixel_format_bpp, DXGI_FORMAT dxgi_format, bool srgb)
+static bool save_dds(const char *pFilename, uint32_t width, uint32_t height, const void *pBlocks, uint32_t pixel_format_bpp, DXGI_FORMAT dxgi_format, bool srgb, bool force_dx10_header)
 {
 	(void)srgb;
 
@@ -371,25 +372,46 @@ static bool save_dds(const char *pFilename, uint32_t width, uint32_t height, con
 				
 	desc.ddpfPixelFormat.dwFlags |= DDPF_FOURCC;
 
-	desc.ddpfPixelFormat.dwFourCC = (uint32_t)PIXEL_FMT_FOURCC('D', 'X', '1', '0');
-	desc.ddpfPixelFormat.dwRGBBitCount = 0;
-
 	desc.lPitch = (((desc.dwWidth + 3) & ~3) * ((desc.dwHeight + 3) & ~3) * pixel_format_bpp) >> 3;
 	desc.dwFlags |= DDSD_LINEARSIZE;
+	
+	desc.ddpfPixelFormat.dwRGBBitCount = 0;
 
-	fwrite(&desc, sizeof(desc), 1, pFile);
-		
-	DDS_HEADER_DXT10 hdr10;
-	memset(&hdr10, 0, sizeof(hdr10));
+	if ( (!force_dx10_header) &&
+		 ((dxgi_format == DXGI_FORMAT_BC1_UNORM) ||
+		 (dxgi_format == DXGI_FORMAT_BC3_UNORM) ||
+		 (dxgi_format == DXGI_FORMAT_BC4_UNORM) ||
+		 (dxgi_format == DXGI_FORMAT_BC5_UNORM)) )
+	{
+		if (dxgi_format == DXGI_FORMAT_BC1_UNORM)
+			desc.ddpfPixelFormat.dwFourCC = (uint32_t)PIXEL_FMT_FOURCC('D', 'X', 'T', '1');
+		else if (dxgi_format == DXGI_FORMAT_BC3_UNORM)
+			desc.ddpfPixelFormat.dwFourCC = (uint32_t)PIXEL_FMT_FOURCC('D', 'X', 'T', '5');
+		else if (dxgi_format == DXGI_FORMAT_BC4_UNORM)
+			desc.ddpfPixelFormat.dwFourCC = (uint32_t)PIXEL_FMT_FOURCC('A', 'T', 'I', '1');
+		else if (dxgi_format == DXGI_FORMAT_BC5_UNORM)
+			desc.ddpfPixelFormat.dwFourCC = (uint32_t)PIXEL_FMT_FOURCC('A', 'T', 'I', '2');
 
-	// Not all tools support DXGI_FORMAT_BC7_UNORM_SRGB (like NVTT), but ddsview in DirectXTex pays attention to it. So not sure what to do here.
-	// For best compatibility just write DXGI_FORMAT_BC7_UNORM.
-	//hdr10.dxgiFormat = srgb ? DXGI_FORMAT_BC7_UNORM_SRGB : DXGI_FORMAT_BC7_UNORM;
-	hdr10.dxgiFormat = dxgi_format; // DXGI_FORMAT_BC7_UNORM;
-	hdr10.resourceDimension = D3D10_RESOURCE_DIMENSION_TEXTURE2D;
-	hdr10.arraySize = 1;
+		fwrite(&desc, sizeof(desc), 1, pFile);
+	}
+	else
+	{
+		desc.ddpfPixelFormat.dwFourCC = (uint32_t)PIXEL_FMT_FOURCC('D', 'X', '1', '0');
+						
+		fwrite(&desc, sizeof(desc), 1, pFile);
 
-	fwrite(&hdr10, sizeof(hdr10), 1, pFile);
+		DDS_HEADER_DXT10 hdr10;
+		memset(&hdr10, 0, sizeof(hdr10));
+
+		// Not all tools support DXGI_FORMAT_BC7_UNORM_SRGB (like NVTT), but ddsview in DirectXTex pays attention to it. So not sure what to do here.
+		// For best compatibility just write DXGI_FORMAT_BC7_UNORM.
+		//hdr10.dxgiFormat = srgb ? DXGI_FORMAT_BC7_UNORM_SRGB : DXGI_FORMAT_BC7_UNORM;
+		hdr10.dxgiFormat = dxgi_format; // DXGI_FORMAT_BC7_UNORM;
+		hdr10.resourceDimension = D3D10_RESOURCE_DIMENSION_TEXTURE2D;
+		hdr10.arraySize = 1;
+
+		fwrite(&hdr10, sizeof(hdr10), 1, pFile);
+	}
 
 	fwrite(pBlocks, desc.lPitch, 1, pFile);
 
@@ -454,6 +476,7 @@ int main(int argc, char *argv[])
 
 	DXGI_FORMAT dxgi_format = DXGI_FORMAT_BC7_UNORM;
 	uint32_t pixel_format_bpp = 8;
+	bool force_dx10_dds = false;
 	
 	for (int i = 1; i < argc; i++)
 	{
@@ -518,6 +541,11 @@ int main(int argc, char *argv[])
 						fprintf(stderr, "Invalid argument: %s\n", pArg);
 						return EXIT_FAILURE;
 					}
+					break;
+				}
+				case 'f':
+				{
+					force_dx10_dds = true;
 					break;
 				}
 				case 'u':
@@ -817,7 +845,7 @@ int main(int argc, char *argv[])
 		printf("Source image had an alpha channel.\n");
 			
 	bool failed = false;
-	if (!save_dds(dds_output_filename.c_str(), orig_width, orig_height, (bytes_per_block == 16) ? (void*)&packed_image16[0] : (void*)&packed_image8[0], pixel_format_bpp, dxgi_format, perceptual))
+	if (!save_dds(dds_output_filename.c_str(), orig_width, orig_height, (bytes_per_block == 16) ? (void*)&packed_image16[0] : (void*)&packed_image8[0], pixel_format_bpp, dxgi_format, perceptual, force_dx10_dds))
 		failed = true;
 	else
 		printf("Wrote DDS file %s\n", dds_output_filename.c_str());
