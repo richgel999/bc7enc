@@ -1,5 +1,7 @@
 bc7enc - Fast, single source file BC1-5 and BC7/BPTC GPU texture encoders.
 
+Note: The latest version of this repo, supporting rate distortion optimization for BC1-7, is [here](https://github.com/richgel999/bc7enc_rdo).
+
 This is primarily a testbed for rgbcx.h, which is [one of the highest quality BC1 encoders available (if not the highest quality)](https://aras-p.info/blog/2020/12/08/Texture-Compression-in-2020/).
 
 To compile: Use CMake, and run "cmake ." in the project's root directory to generate either a Visual Studio .SLN file or make files.
