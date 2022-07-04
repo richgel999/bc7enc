@@ -1,6 +1,6 @@
 bc7enc - Fast, single source file BC1-5 and BC7/BPTC GPU texture encoders.
 
-Note: The latest version of this repo, supporting rate distortion optimization for BC1-7, is [here](https://github.com/richgel999/bc7enc_rdo).
+Note: The latest version of this repo, supporting rate distortion optimization for BC1-7, is [here](https://github.com/richgel999/bc7enc_rdo). The BC7 encoder here does not support all the modes, and is not vectorized. See bc7e.ispc in the bc7enc_rdo repo, which is far better.
 
 This is primarily a testbed for rgbcx.h, which is [one of the highest quality BC1 encoders available (if not the highest quality)](https://aras-p.info/blog/2020/12/08/Texture-Compression-in-2020/).
 
